@@ -1,0 +1,50 @@
+
+================================================================================
+📊 CRYPTO TOP 20 SCANNER REPORT - 2026-03-21 14:35:27
+Market Sentiment: 12.0 (Fear & Greed)
+================================================================================
+
+📅 市場背景分析 (2026-03-21 14:35)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+市場階段：🌱 底部復甦 — 等待確認
+主導性：  ⚪ 混合走勢 (BTC 7d: -0.7% vs ALT: +1.0%)
+恐懼指數：12 ↘ 趨勢(23→11→12)
+美元 DXY： 99.5 — 美元中性
+周期確認：⚡ 多數周期看漲，短線機會
+  (1h RSI:67/UP | 4h RSI:46/UP | 1d RSI:61/NEUTRAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+→ 復甦初期 + 多周期看漲，可小倉佈局強勢幣種
+
+🤖 *Antigravity 市場掃描週報*
+📊 市場情緒：*12.0* (恐懼與貪婪指數)
+----------------------------
+✅ 目前大盤暫無強烈訊號，建議先觀望。
+----------------------------
+📚 *專有名詞小百科*：
+• *信心度 (Confidence)*：系統參謀(均線、MACD等)的共識強度。越接近 1 代表越看好。
+• *RSI*：市場的體力值。< 30 代表「超跌」(可能反彈)；> 70 代表「超買」(可能回檔)。
+----------------------------
+
+--------------------------------------------------------------------------------
+    Symbol        Price Price(TWD) Signal Confidence  RSI                                                                                                                                                                    Reason Signal_1d Confidence_1d RSI_1d
+  BTC/USDT 70757.300000 2221779.22   HOLD       0.67 61.5                    Weighted vote: BUY=0.176, SELL=0.000, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  ETH/USDT  2154.990000   67666.69   HOLD       0.77 60.7                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+NIGHT/USDT     0.044020       1.38   HOLD       0.77 40.1                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  SOL/USDT    90.230000    2833.22   HOLD       0.77 60.9                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  XRP/USDT     1.450400      45.54   HOLD       0.77 62.2                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  TAO/USDT   272.600000    8559.64   HOLD       0.77 46.4                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  BNB/USDT   643.090000   20193.03   HOLD       0.67 60.1                    Weighted vote: BUY=0.176, SELL=0.000, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  ZEC/USDT   232.970000    7315.26   HOLD       0.77 42.9                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+ DOGE/USDT     0.094850       2.98   HOLD       0.77 65.7                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  TRX/USDT     0.311600       9.78   HOLD       0.40 77.6                    Weighted vote: BUY=0.191, SELL=0.098, HOLD=0.196 | SMA_Crossover=HOLD(0.50), RSI=SELL(0.30), MACD=BUY(0.40), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  WLD/USDT     0.322400      10.12   HOLD       0.65 46.4                    Weighted vote: BUY=0.191, SELL=0.000, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=BUY(0.40), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+    U/USDT     1.000200      31.41   HOLD       0.67 44.5                   Weighted vote: BUY=0.130, SELL=0.046, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=SELL(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+ LINK/USDT     9.130000     286.68   HOLD       0.77 57.9                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  SUI/USDT     0.969900      30.45   HOLD       0.67 61.3                    Weighted vote: BUY=0.176, SELL=0.000, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  ADA/USDT     0.266700       8.37   HOLD       0.67 55.7                    Weighted vote: BUY=0.176, SELL=0.000, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+ PEPE/USDT     0.000003       0.00   HOLD       0.77 58.0                   Weighted vote: BUY=0.130, SELL=0.000, HOLD=0.435 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+  FET/USDT     0.232800       7.31   HOLD       0.51 71.4 Weighted vote: BUY=0.241, SELL=0.098, HOLD=0.130 | SMA_Crossover=BUY(0.50), RSI=SELL(0.30), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00) [SOL:low-conf<0.55]      HOLD          0.00    N/A
+ WLFI/USDT     0.094700       2.97   HOLD       0.42 71.7                    Weighted vote: BUY=0.176, SELL=0.098, HOLD=0.196 | SMA_Crossover=HOLD(0.50), RSI=SELL(0.30), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+ NEAR/USDT     1.319000      41.42   HOLD       0.67 47.4                    Weighted vote: BUY=0.176, SELL=0.000, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=BUY(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+ KITE/USDT     0.215700       6.77   HOLD       0.67 41.4                   Weighted vote: BUY=0.130, SELL=0.046, HOLD=0.359 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=SELL(0.30), Bollinger=HOLD(0.50), Sentiment=BUY(1.00)      HOLD          0.00    N/A
+================================================================================

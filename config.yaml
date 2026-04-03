@@ -1,0 +1,238 @@
+# ===== 自主交易機器人設定 =====
+# v0.6.3 — 短線信號敏感度提升 (Short-term Signal Sensitivity)
+# 每個市場可選擇性覆蓋全域的 strategies / risk / decision_engine。
+# 未覆蓋的欄位自動回退到全域預設值 (deep merge)。
+
+# 全域設定
+general:
+  trading_mode: paper          # paper / live
+  base_currency: USDT          # 基礎計價幣
+  initial_capital: 100000      # 初始虛擬資金
+  log_level: INFO
+
+# =============================================
+# 全域預設策略 (所有市場共用的基礎設定)
+# =============================================
+strategies:
+  sma_crossover:
+    enabled: true
+    weight: 1.0
+    params:
+      fast_period: 5
+      slow_period: 15
+
+  rsi:
+    enabled: true
+    weight: 1.0
+    params:
+      period: 7
+      oversold: 35
+      overbought: 65
+
+  macd:
+    enabled: true
+    weight: 1.0
+    params:
+      fast: 8
+      slow: 21
+      signal: 5
+
+  bollinger:
+    enabled: true
+    weight: 0.8
+    params:
+      period: 14
+      std_dev: 1.5
+
+  # 情緒策略 (全域預設: 關閉)
+  sentiment:
+    enabled: false
+    weight: 0.6
+    params:
+      mode: contrarian            # contrarian=反向思維, momentum=順勢
+      fear_buy_threshold: 25      # 情緒低於此值 → 買入信號
+      greed_sell_threshold: 75    # 情緒高於此值 → 賣出信號
+      neutral_low: 40             # 中性區下界
+      neutral_high: 60            # 中性區上界
+
+  # 資金費率策略 (全域預設: 關閉)
+  funding_rate:
+    enabled: false
+    weight: 0.6
+    params:
+      mode: signal                # signal 或是 filter
+      high_threshold: 0.00015     # (0.015%) 高過此值看空
+      low_threshold: -0.00015     # (-0.015%) 低過此值看多
+
+  # 大盤環境濾網 (全域預設: 關閉)
+  btc_regime:
+    enabled: false
+    weight: 1.0
+    params:
+      sma_period: 50
+
+# 全域預設風險管理
+risk:
+  max_position_pct: 0.30       # 單一標的最大佔比 30%
+  max_total_risk_pct: 0.80     # 總風險最大 80%
+  stop_loss_pct: 0.03          # 止損 3%
+  take_profit_pct: 0.05        # 止盈 5%
+  max_positions: 10            # 最大同時持倉數
+  max_daily_trades: 20         # 每日最大交易次數
+  trailing_stop: true          # 啟用追蹤止損
+  trailing_stop_pct: 0.02      # 追蹤止損 2%
+
+# 全域預設決策引擎
+decision_engine:
+  voting_method: weighted      # weighted / majority
+  min_agreement: 0.4           # 最低策略同意比例
+  market_state_detection: true # 啟用市場狀態偵測
+  auto_rebalance: true         # 自動再平衡策略權重
+  rebalance_interval: 24h      # 再平衡間隔
+
+# =============================================
+# 市場設定 (各市場可覆蓋全域預設)
+# =============================================
+markets:
+  # ----- 虛擬貨幣 (24h 不休市, 高波動) -----
+  crypto:
+    enabled: true
+    exchange: binance
+    sandbox: true              # 使用 Testnet
+    symbols:
+      - BTC/USDT
+      - ETH/USDT
+    timeframe: 1h              # 小時線 (24h 不休息，適合短線)
+
+    # ↓ 虛擬幣專屬策略覆蓋 (只需寫要改的部分) ↓
+    strategies:
+      sma_crossover:
+        params:
+          fast_period: 7       # [v0.3.1] 3→7，減少假穿越
+          slow_period: 25      # [v0.3.1] 8→25，5:1 比例更有意義
+      rsi:
+        params:
+          period: 7            # [v0.6.3] 14→7，1h 短線需要更高靈敏度
+          oversold: 30         # [v0.3.1] 25→30，配合高信心門檻
+          overbought: 70       # [v0.3.1] 75→70，更早捕捉賣出機會
+      macd:
+        params:
+          fast: 6
+          slow: 13
+          signal: 4
+      bollinger:
+        params:
+          period: 10
+          std_dev: 2.5         # 通道加寬 (幣圈波動大)
+      # ↓ 虛擬幣啟用情緒策略 (Fear & Greed Index) ↓
+      # 加密幣市場受推文、政策新聞影響極大，情緒指標可以
+      # 幫助在市場極度恐慌時抄底，極度貪婪時逃頂
+      sentiment:
+        enabled: true          # 覆蓋全域的 false → 只有虛擬幣啟用情緒策略
+
+      # ↓ 虛擬幣啟用資金費率濾網 (Funding Rate) ↓
+      funding_rate:
+        enabled: true          # 覆蓋全域 false
+        params:
+          mode: filter         # 啟動濾網模式
+          filter_threshold: 0.0003  # 費率 > 0.03% 才否決 (不再是 > 0 就否決)
+
+      # ↓ 虛擬幣啟用大盤環境濾網 (BTC Regime) ↓
+      btc_regime:
+        enabled: true          # 覆蓋全域 false
+        params:
+          sma_period: 50       # 50MA 判斷趨勢
+
+      # ↓ 成交量確認濾網 (Volume Filter) ↓
+      volume_filter:
+        enabled: true
+        params:
+          min_volume_ratio: 0.5   # 低於 20 日均量 50% → 否決買入
+          vol_sma_period: 20
+
+    # 虛擬幣專屬風控覆蓋 (針對日線 1d 設計)
+    risk:
+      stop_loss_pct: 0.05      # 固定止損 5% (ATR 啟用時為 fallback)
+      take_profit_pct: 0.15    # 目標獲利 15%
+      trailing_stop_pct: 0.04  # 追蹤止損 4%，一旦有獲利及早鎖定
+      max_daily_trades: 2      # 日線級別交易次數極少，限制 2 次足矣
+      atr_multiplier: 2.0      # ATR 動態止損倍數 (0=停用，2=止損距離為 2×ATR)
+
+    # 虛擬幣專屬決策覆蓋
+    decision_engine:
+      min_agreement: 0.40      # [v0.6.3] 0.55→0.40，降低門檻讓短線信號通過，搭配濾網仍有防護
+      
+      # 短線恐慌抄底覆蓋機制 — 已停用
+      # 數據顯示 RSI<20 信號在下跌趨勢中勝率=0%，平均-1.11%，ADA/KITE 觸發後均虧損
+      panic_buy_override:
+        enabled: false         # [v0.3.1] 停用：下跌中越跌越買反而加重虧損
+
+  # ----- 美股 (使用全域預設，不需額外覆蓋) -----
+  us_stock:
+    enabled: true
+    broker: alpaca
+    paper_trading: true
+    symbols:
+      - AAPL
+      - TSLA
+      - NVDA
+      - SPY
+    timeframe: 1d
+    # 美股不設定覆蓋，自動使用全域預設策略和風控
+
+  # ----- 台股 -----
+  tw_stock:
+    enabled: true
+    broker: yfinance             # 免費方案 (Shioaji 需永豐帳戶)
+    simulation: true
+    symbols:
+      - "2330"                 # 台積電 (半導體)
+      - "2317"                 # 鴻海 (電子代工)
+      - "2454"                 # 聯發科 (IC設計)
+      - "2882"                 # 國泰金 (金融)
+      - "2881"                 # 富邦金 (金融)
+      - "2603"                 # 長榮 (航運)
+      - "2002"                 # 中鋼 (鋼鐵)
+      - "3711"                 # 日月光 (封測)
+      - "2412"                 # 中華電 (電信)
+      - "6214"                 # 精誠 (資訊服務)
+      - "2308"                 # 台達電 (電源)
+    timeframe: 1d
+
+    # 台股專屬策略覆蓋 (日線級別，比加密幣更保守)
+    strategies:
+      sma_crossover:
+        params:
+          fast_period: 10
+          slow_period: 50
+      rsi:
+        params:
+          period: 14
+          oversold: 30
+          overbought: 70
+      macd:
+        params:
+          fast: 12
+          slow: 26
+          signal: 9
+      bollinger:
+        params:
+          period: 20
+          std_dev: 2.0
+
+    decision_engine:
+      min_agreement: 0.55       # 台股日線比加密幣保守
+
+# 回測設定
+backtest:
+  start_date: "2025-01-01"
+  end_date: "2025-12-31"
+  commission_pct: 0.001        # 手續費 0.1%
+  slippage_pct: 0.0005         # 滑點 0.05%
+
+# 監控設定
+monitor:
+  dashboard_port: 5000
+  enable_alerts: true
+  alert_on_trade: true
+  alert_on_loss_pct: 0.03      # 單筆虧損 3% 告警

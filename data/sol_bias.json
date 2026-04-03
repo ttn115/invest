@@ -1,0 +1,119 @@
+{
+  "analysis_date": "2026-03-21 14:35",
+  "total_signals_analyzed": 539,
+  "min_agreement": 0.55,
+  "min_agreement_reason": "勝率正常 (48%)，維持預設",
+  "blocked_contexts": [
+    {
+      "key": "BEAR|BTC_SEASON|FLAT",
+      "total": 16,
+      "wins": 3,
+      "losses": 13,
+      "win_rate": 18.75,
+      "avg_pnl": -0.00340625
+    }
+  ],
+  "golden_contexts": [
+    {
+      "key": "RECOVERY|MIXED|RISING",
+      "total": 9,
+      "wins": 9,
+      "losses": 0,
+      "win_rate": 100.0,
+      "avg_pnl": 0.00481111111111111
+    },
+    {
+      "key": "BEAR|MIXED|RISING",
+      "total": 43,
+      "wins": 27,
+      "losses": 16,
+      "win_rate": 62.7906976744186,
+      "avg_pnl": 0.003374418604651162
+    },
+    {
+      "key": "BEAR|ALT_SEASON|RISING",
+      "total": 10,
+      "wins": 8,
+      "losses": 2,
+      "win_rate": 80.0,
+      "avg_pnl": 0.0046700000000000005
+    }
+  ],
+  "context_stats": {
+    "RECOVERY|MIXED|FALLING": {
+      "total": 107,
+      "win_rate": 53.3,
+      "avg_pnl": 0.217
+    },
+    "RECOVERY|BTC_SEASON|FALLING": {
+      "total": 10,
+      "win_rate": 60.0,
+      "avg_pnl": 0.403
+    },
+    "RECOVERY|MIXED|FLAT": {
+      "total": 117,
+      "win_rate": 49.6,
+      "avg_pnl": 0.147
+    },
+    "RECOVERY|BTC_SEASON|FLAT": {
+      "total": 15,
+      "win_rate": 53.3,
+      "avg_pnl": 0.248
+    },
+    "RECOVERY|BTC_SEASON|RISING": {
+      "total": 1,
+      "win_rate": 100.0,
+      "avg_pnl": 0.35
+    },
+    "RECOVERY|MIXED|RISING": {
+      "total": 9,
+      "win_rate": 100.0,
+      "avg_pnl": 0.481
+    },
+    "RECOVERY|ALT_SEASON|FLAT": {
+      "total": 2,
+      "win_rate": 0.0,
+      "avg_pnl": -0.11
+    },
+    "BEAR|BTC_SEASON|RISING": {
+      "total": 8,
+      "win_rate": 37.5,
+      "avg_pnl": -0.086
+    },
+    "BEAR|MIXED|RISING": {
+      "total": 43,
+      "win_rate": 62.8,
+      "avg_pnl": 0.337
+    },
+    "BEAR|ALT_SEASON|RISING": {
+      "total": 10,
+      "win_rate": 80.0,
+      "avg_pnl": 0.467
+    },
+    "BEAR|MIXED|FLAT": {
+      "total": 156,
+      "win_rate": 41.0,
+      "avg_pnl": -0.088
+    },
+    "BEAR|ALT_SEASON|FLAT": {
+      "total": 34,
+      "win_rate": 38.2,
+      "avg_pnl": -0.201
+    },
+    "BEAR|BTC_SEASON|FLAT": {
+      "total": 16,
+      "win_rate": 18.8,
+      "avg_pnl": -0.341
+    },
+    "BEAR|MIXED|FALLING": {
+      "total": 9,
+      "win_rate": 33.3,
+      "avg_pnl": -0.017
+    },
+    "BEAR|ALT_SEASON|FALLING": {
+      "total": 2,
+      "win_rate": 50.0,
+      "avg_pnl": -0.14
+    }
+  }
+}

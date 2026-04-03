@@ -1,0 +1,9 @@
+Symbol: 6214
+Date: 2026-03-06 00:00:00+08:00
+Close: 112.0
+Final Signal: HOLD
+Confidence: 1.00
+Reason: Weighted vote: BUY=0.000, SELL=0.000, HOLD=0.500 | SMA_Crossover=HOLD(0.50), RSI=HOLD(0.50), MACD=HOLD(0.50), Bollinger=HOLD(0.50)
+RSI(14): 46.79495742339825
+SMA(10/50): 111.2 / 116.59
+Bollinger Position: 45.99%
