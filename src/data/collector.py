@@ -178,7 +178,8 @@ class StockCollector(BaseCollector):
 
             # 設定預設日期範圍
             if not end:
-                end = dt.datetime.now().strftime("%Y-%m-%d")
+                # yfinance history() uses exclusive end date, so +1 day to include today
+                end = (dt.datetime.now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
             if not start:
                 # 根據 limit 和 timeframe 推算起始日期
                 days = limit if timeframe == "1d" else limit // 24
@@ -266,13 +267,14 @@ class TwStockCollector(BaseCollector):
             yf_symbol = f"{symbol}.TW" if not symbol.endswith(".TW") else symbol
 
             if not end:
-                end = dt.datetime.now().strftime("%Y-%m-%d")
+                # yfinance history() uses exclusive end date, so +1 day to include today
+                end = (dt.datetime.now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
             if not start:
                 start_dt = dt.datetime.now() - dt.timedelta(days=max(limit, 365))
                 start = start_dt.strftime("%Y-%m-%d")
 
             ticker = yf.Ticker(yf_symbol)
-            df = ticker.history(start=start, end=end)
+            df = ticker.history(start=start, end=end, auto_adjust=False)
 
             if df.empty:
                 logger.warning(f"No data returned for {yf_symbol}")
@@ -285,6 +287,7 @@ class TwStockCollector(BaseCollector):
                 "High": "high",
                 "Low": "low",
                 "Close": "close",
+                "Adj Close": "adj_close",
                 "Volume": "volume",
             })
 

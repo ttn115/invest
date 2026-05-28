@@ -21,7 +21,12 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 import requests
+import urllib3
 from loguru import logger
+
+# TWSE SSL 憑證缺少 Subject Key Identifier，Python requests 無法驗證
+# 對 TWSE 官方端點停用 SSL 驗證（僅限內部使用，不傳輸敏感資料）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     import yfinance as yf
@@ -212,10 +217,12 @@ class TwMarketContextAnalyzer:
             date_str = today.strftime("%Y%m%d")
             url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?date={date_str}&response=json"
 
-            resp = requests.get(url, timeout=10, headers={
-                "User-Agent": "Mozilla/5.0",
+            _headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept-Language": "zh-TW,zh;q=0.9",
-            })
+                "Referer": "https://www.twse.com.tw/",
+            }
+            resp = requests.get(url, timeout=15, headers=_headers, verify=False)
             data = resp.json()
 
             if data.get("stat") != "OK" or not data.get("data"):
@@ -223,10 +230,7 @@ class TwMarketContextAnalyzer:
                 yesterday = today - dt.timedelta(days=1)
                 date_str = yesterday.strftime("%Y%m%d")
                 url = f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?date={date_str}&response=json"
-                resp = requests.get(url, timeout=10, headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept-Language": "zh-TW,zh;q=0.9",
-                })
+                resp = requests.get(url, timeout=15, headers=_headers, verify=False)
                 data = resp.json()
 
             if data.get("stat") == "OK" and data.get("data"):
