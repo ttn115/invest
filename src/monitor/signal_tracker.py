@@ -87,13 +87,19 @@ class SignalTracker:
                       market_ctx=None):
         """
         記錄一筆新信號（含去重檢查 + 市場背景標籤）
-        
+
         Args:
             market_ctx: MarketContext 物件 (SOL Phase 1: 背景標籤化)
         """
         # 去重：同一標的同方向 4 小時內不重複記錄
         if self._has_recent_signal(symbol, signal, hours=4):
             logger.debug(f"⏭️ Skipped duplicate {signal} for {symbol} (recent signal exists)")
+            return False
+
+        # Munger Filter: 無市場背景脈絡的信號不記錄
+        # 根據歷史數據：空 context 的 33 筆信號勝率僅 30.3%，avg -0.342%（最差類別）
+        if market_ctx is None or not getattr(market_ctx, "phase", ""):
+            logger.info(f"⏭️ Skipped {signal} for {symbol} (no market context — 歷史勝率 30%, 不記錄)")
             return False
 
         # SOL Phase 1: 提取市場背景標籤

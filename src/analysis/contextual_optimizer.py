@@ -27,6 +27,21 @@ BIAS_FILE = Path(__file__).parent.parent / ".." / "data" / "sol_bias.json"
 # 最少需要多少筆帶有 context 的信號才能進行分析
 MIN_SIGNALS_FOR_ANALYSIS = 15
 
+# market_type → bias 檔路徑對應
+_BIAS_FILES = {
+    "all":    "sol_bias.json",
+    "crypto": "sol_bias_crypto.json",
+    "stock":  "sol_bias_stock.json",
+}
+
+def _is_crypto_symbol(symbol: str) -> bool:
+    """判斷信號是否來自加密幣市場（symbol 含 '/'，如 BTC/USDT）"""
+    return "/" in symbol
+
+def _is_stock_symbol(symbol: str) -> bool:
+    """判斷信號是否來自股票市場（.US / .TW 後綴，或純數字台股代碼）"""
+    return ".US" in symbol or ".TW" in symbol or (symbol.isdigit())
+
 
 @dataclass
 class ContextPerformance:
@@ -41,13 +56,33 @@ class ContextPerformance:
 
     @property
     def is_toxic(self) -> bool:
-        """判斷此環境組合是否有毒（勝率極低且虧損顯著）"""
-        return self.total >= 5 and self.win_rate < 20.0 and self.avg_pnl < -0.002
+        """判斷此環境組合是否有毒（勝率極低且虧損顯著）
+
+        兩層判斷：
+        - 強毒：勝率 < 25% 且 avg_pnl < -0.002（極端劣勢）
+        - 弱毒：樣本數 >= 20 且勝率 < 44% 且 avg_pnl < -0.0005（穩定負期望值）
+          → 覆蓋 BEAR|MIXED|FLAT (41% WR, -0.088%) 和 BEAR|ALT_SEASON|FLAT (38% WR, -0.201%)
+        """
+        strong_toxic = self.total >= 5 and self.win_rate < 25.0 and self.avg_pnl < -0.002
+        weak_toxic = self.total >= 20 and self.win_rate < 44.0 and self.avg_pnl < -0.0005
+        return strong_toxic or weak_toxic
 
     @property
     def is_golden(self) -> bool:
-        """判斷此環境組合是否是黃金組合（勝率高且獲利顯著）"""
-        return self.total >= 5 and self.win_rate > 60.0 and self.avg_pnl > 0.001
+        """判斷此環境組合是否是黃金組合（勝率高且獲利顯著）
+
+        統計門檻提高至 30 個樣本，避免小樣本過度擬合：
+        - 10 樣本的 100% 勝率，95% CI 下界僅 ~69%，不可信
+        - 30 樣本才能提供 ±15% 的合理估計區間
+        """
+        if self.total < 30:
+            return False
+        # 95% Wilson CI 下界近似：win_rate - 1.96 * sqrt(win_rate*(1-win_rate)/n)
+        import math
+        p = self.win_rate / 100.0
+        ci_lower = p - 1.96 * math.sqrt(p * (1 - p) / self.total) if self.total > 0 else 0
+        # 要求：CI 下界 > 55%（確信勝率真的高於隨機）
+        return ci_lower > 0.55 and self.avg_pnl > 0.001
 
 
 @dataclass
@@ -116,9 +151,26 @@ class ContextualOptimizer:
     - 將分析結果持久化到 sol_bias.json
     """
 
-    def __init__(self, history_file: str = None, bias_file: str = None):
+    def __init__(self, history_file: str = None, bias_file: str = None,
+                 market_type: str = "all"):
+        """
+        Args:
+            history_file: 自訂信號歷史 CSV 路徑（None 使用預設）
+            bias_file: 自訂偏差 JSON 路徑（None 依 market_type 自動選擇）
+            market_type: "all" | "crypto" | "stock"
+                - "all": 不過濾，所有市場信號混合學習（向下相容）
+                - "crypto": 只學習加密幣信號（symbol 含 '/'）
+                - "stock": 只學習股票信號（.US / .TW / 純數字代碼）
+        """
         self.history_file = Path(history_file) if history_file else HISTORY_FILE.resolve()
-        self.bias_file = Path(bias_file) if bias_file else BIAS_FILE.resolve()
+        self.market_type = market_type
+
+        # 依 market_type 自動選擇 bias 檔路徑
+        if bias_file:
+            self.bias_file = Path(bias_file)
+        else:
+            bias_filename = _BIAS_FILES.get(market_type, "sol_bias.json")
+            self.bias_file = (BIAS_FILE.parent / bias_filename).resolve()
 
     def analyze_and_update(self) -> TradingBias:
         """
@@ -188,7 +240,7 @@ class ContextualOptimizer:
     # ── 內部方法 ──────────────────────────────────────────────
 
     def _load_tagged_signals(self) -> list[dict]:
-        """從 CSV 載入有 ctx_ 標籤的信號"""
+        """從 CSV 載入有 ctx_ 標籤的信號，依 market_type 過濾"""
         if not self.history_file.exists():
             return []
 
@@ -197,8 +249,17 @@ class ContextualOptimizer:
             reader = csv.DictReader(f)
             for row in reader:
                 # 只取有標籤且有 1h PnL 的信號
-                if row.get("ctx_phase") and row.get("pnl_1h_pct"):
-                    tagged.append(row)
+                if not (row.get("ctx_phase") and row.get("pnl_1h_pct")):
+                    continue
+
+                # market_type 過濾
+                symbol = row.get("symbol", "")
+                if self.market_type == "crypto" and not _is_crypto_symbol(symbol):
+                    continue
+                if self.market_type == "stock" and not _is_stock_symbol(symbol):
+                    continue
+
+                tagged.append(row)
         return tagged
 
     def _analyze_context_performance(self, signals: list[dict]) -> dict[str, ContextPerformance]:
