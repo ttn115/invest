@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Generated reports & logs
+data/logs/
+data/reports/
+data/scan_reports/
+data/round_table_advisory_*.md
+scripts/last_*.txt
+pr_body.md
+
+# Data files (runtime-generated)
+data/candidate_universe.json
+data/market_dashboard.md
+data/system_audit_*.md
+
+# Misc
+.DS_Store
+*.log
+.env
+.env.*
