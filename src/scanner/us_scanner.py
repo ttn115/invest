@@ -363,13 +363,16 @@ class USScanner:
         ticker_str = " ".join(tickers)
         end   = datetime.now()
         start = end - timedelta(days=days)
+        # yfinance 的 end 為排他（exclusive），+1 天確保平日收盤後不漏掉當天 K 棒
+        # （與 src/data/collector.py 的修法一致）
+        end_exclusive = end + timedelta(days=1)
         logger.info(f"  批量下載 {len(tickers)} 支，{start.date()} ~ {end.date()}")
 
         try:
             raw = yf.download(
                 ticker_str,
                 start=start.strftime("%Y-%m-%d"),
-                end=end.strftime("%Y-%m-%d"),
+                end=end_exclusive.strftime("%Y-%m-%d"),
                 interval="1d",
                 auto_adjust=True,
                 progress=False,

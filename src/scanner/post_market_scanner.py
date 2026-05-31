@@ -456,6 +456,32 @@ class PostMarketScanner:
 
     # ── 主入口 ──────────────────────────────────────────────────
 
+    def _resolve_latest_trading_day(self, max_back: int = 7):
+        """
+        未指定日期時，從今天往前找最近有收盤資料的交易日。
+        解決週末/連假/盤後 T86 未公布時查今天 → 空資料 → 0 候選 的問題。
+
+        Returns:
+            (date_str, df_price)：找到的日期字串與其收盤 DataFrame
+        """
+        from datetime import timedelta
+        today = date.today()
+        for back in range(max_back + 1):
+            d = (today - timedelta(days=back)).strftime("%Y-%m-%d")
+            if back == 0:
+                logger.info(f"🔍 盤後掃描啟動：嘗試最新交易日 {d}")
+            else:
+                logger.info(f"  ↩ 往前回退第 {back} 天，嘗試 {d}")
+            df = self.vol_collector.fetch_daily_all(d)
+            if not df.empty:
+                if back > 0:
+                    logger.info(f"✅ 自動定位最近交易日：{d}（今天往前 {back} 天）")
+                return d, df
+        # 全部落空，回傳今天 + 空 DataFrame
+        return today.strftime("%Y-%m-%d"), self.vol_collector.fetch_daily_all(
+            today.strftime("%Y-%m-%d")
+        )
+
     def scan(
         self,
         target_date:      Optional[str] = None,
@@ -480,13 +506,16 @@ class PostMarketScanner:
         Returns:
             ScanResult
         """
-        scan_date = target_date or date.today().strftime("%Y-%m-%d")
-        logger.info(f"🔍 盤後掃描啟動：{scan_date}")
+        # Step 1: 抓收盤資料（未指定日期時，自動回退到最近的交易日）
+        if target_date:
+            scan_date = target_date
+            logger.info(f"🔍 盤後掃描啟動：{scan_date}")
+            df_price = self.vol_collector.fetch_daily_all(scan_date)
+        else:
+            scan_date, df_price = self._resolve_latest_trading_day(max_back=7)
 
-        # Step 1: 抓今日收盤資料
-        df_price = self.vol_collector.fetch_daily_all(scan_date)
         if df_price.empty:
-            logger.warning("收盤價資料為空，可能是非交易日")
+            logger.warning("收盤價資料為空，可能是非交易日或近 7 日皆無資料")
             return ScanResult(scan_date=scan_date, total_stocks=0)
 
         # Step 2: 抓三大法人 + 融資融券

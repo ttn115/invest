@@ -40,6 +40,8 @@ def parse_args():
     p.add_argument("--no-tw",       action="store_true",           help="跳過台股掃描")
     p.add_argument("--no-crypto",   action="store_true",           help="跳過虛擬幣掃描")
     p.add_argument("--no-us",       action="store_true",           help="跳過美股掃描")
+    p.add_argument("--no-track",        action="store_true",       help="不記錄圓桌推薦到 roundtable_history.csv")
+    p.add_argument("--no-fundamentals", action="store_true",       help="不注入基本面（ROE/FCF/PEG）")
     p.add_argument("--market-note", default="",                    help="市場備注")
     return p.parse_args()
 
@@ -63,6 +65,7 @@ def main():
     tw_candidates     = []
     crypto_candidates = []
     us_candidates     = []
+    crypto_scanner    = None      # 保留參考，圓桌環境分析會用到其 exchange
 
     # ── Step 1: 台股盤後掃描 ─────────────────────────────────────
     if not args.no_tw:
@@ -90,7 +93,7 @@ def main():
         try:
             from src.scanner.crypto_scanner import CryptoScanner
             crypto_scanner = CryptoScanner()
-            crypto_result  = crypto_scanner.scan(min_score=25)
+            crypto_result  = crypto_scanner.scan(min_score=25)  # noqa: F841 (scanner kept for ctx)
             crypto_candidates = crypto_result.top[: args.crypto_top]
             logger.info(f"  虛擬幣候選：{len(crypto_candidates)} 支送圓桌")
         except Exception as e:
@@ -120,11 +123,29 @@ def main():
     logger.info(f"\n共 {total} 支候選送入圓桌：台股 {len(tw_candidates)} + "
                 f"虛擬幣 {len(crypto_candidates)} + 美股 {len(us_candidates)}")
 
+    # ── Step 3.5: 市場背景分析（供環境提示 + 圓桌推薦記錄）────────
+    tw_ctx = crypto_ctx = None
+    logger.info("\n[Step 3.5] 市場背景分析...")
+    if tw_candidates or us_candidates:
+        try:
+            from src.analysis.tw_market_context import TwMarketContextAnalyzer
+            tw_ctx = TwMarketContextAnalyzer().analyze()
+            logger.info(f"  台股環境：{getattr(tw_ctx, 'taiex_phase', '?')}")
+        except Exception as e:
+            logger.warning(f"  台股環境分析失敗: {e}")
+    if crypto_candidates and crypto_scanner is not None:
+        try:
+            from src.analysis.market_context import MarketContextAnalyzer
+            crypto_ctx = MarketContextAnalyzer(crypto_scanner.exchange).analyze()
+            logger.info(f"  虛擬幣環境：{getattr(crypto_ctx, 'phase', '?')}")
+        except Exception as e:
+            logger.warning(f"  虛擬幣環境分析失敗: {e}")
+
     # ── Step 4: 跨市場圓桌評估 ───────────────────────────────────
     logger.info("\n[Step 4] 圓桌會議進行中（請稍候）...")
     from src.advisor.multi_market_advisor import run_multi_market_roundtable
 
-    report_md = run_multi_market_roundtable(
+    report_md, advisor = run_multi_market_roundtable(
         tw_candidates=tw_candidates,
         crypto_candidates=crypto_candidates,
         us_candidates=us_candidates,
@@ -132,7 +153,33 @@ def main():
         total_capital=args.capital,
         market_note=args.market_note,
         save_path=f"data/reports/roundtable_all_{today}.md",
+        tw_ctx=tw_ctx,
+        crypto_ctx=crypto_ctx,
+        enrich_fundamentals=not args.no_fundamentals,
+        return_advisor=True,
     )
+
+    # ── Step 4.5: 記錄圓桌推薦 + 回驗舊推薦（回饋迴圈）───────────
+    if not args.no_track and advisor is not None and advisor.last_picks:
+        logger.info("\n[Step 4.5] 記錄圓桌推薦 + 回驗舊推薦...")
+        try:
+            from src.advisor.roundtable_tracker import RoundtableTracker
+            tracker = RoundtableTracker()
+
+            # 進場價：從各市場候選組 {asset_id: price}
+            price_map = {}
+            for c in tw_candidates:
+                price_map[c.stock_id] = c.close
+            for c in us_candidates:
+                price_map[c.ticker] = c.close
+            for c in crypto_candidates:
+                price_map[c.base] = c.price
+
+            ctx_map = {"台股": tw_ctx, "美股": tw_ctx, "虛擬幣": crypto_ctx}
+            tracker.record_picks(advisor.last_picks, ctx_map=ctx_map, price_map=price_map)
+            tracker.verify_picks(days_after=3)
+        except Exception as e:
+            logger.warning(f"  圓桌推薦記錄/回驗失敗: {e}")
 
     # ── Step 5: 輸出 ─────────────────────────────────────────────
     logger.info("\n" + sep)
