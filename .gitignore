@@ -27,6 +27,11 @@ pr_body.md
 data/candidate_universe.json
 data/market_dashboard.md
 data/system_audit_*.md
+data/signal_history.csv
+data/sol_bias.json
+data/sol_bias_crypto.json
+data/sol_bias_stock.json
+data/watchlists.json
 
 # Misc
 .DS_Store
