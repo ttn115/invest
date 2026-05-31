@@ -29,6 +29,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
         pass
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 from src.config.settings import Settings
 from src.data.collector import TwStockCollector
@@ -36,14 +39,31 @@ from src.data.indicators import IndicatorEngine
 from src.main import build_decision_engine
 from src.monitor.notifier import TelegramNotifier
 from src.monitor.signal_tracker import SignalTracker
-from src.analysis.tw_market_context import TwMarketContextAnalyzer, TW_STOCK_NAMES
+from src.analysis.tw_market_context import TwMarketContextAnalyzer
 from src.analysis.contextual_optimizer import ContextualOptimizer
+from src.strategy.fundamental_screener import FundamentalScreener
+from report_writer import update_market_section, build_tw_lines
 
 logger.remove()
 logger.add(sys.stdout, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{message}</level>")
 
-# ── 台股觀測名單 ────────────────────────────────────────────
-TW_WATCHLIST = [
+# ── 觀測名單：從 data/watchlists.json 讀取（用 watchlist_manager.py 管理）──
+def _load_tw_watchlist() -> tuple[list[str], dict[str, str]]:
+    """回傳 (tickers_list, name_map)"""
+    import json
+    wl_file = os.path.join(os.path.dirname(__file__), "..", "data", "watchlists.json")
+    try:
+        with open(wl_file, encoding="utf-8") as f:
+            data = json.load(f)
+        symbols_raw = data["tw_stock"]["symbols"]
+        tickers  = [s["ticker"] for s in symbols_raw]
+        name_map = {s["ticker"]: s.get("name", s["ticker"]) for s in symbols_raw}
+        logger.info(f"📋 讀取觀察名單：{len(tickers)} 支台股（data/watchlists.json）")
+        return tickers, name_map
+    except Exception as e:
+        logger.warning(f"⚠️  watchlists.json 讀取失敗，使用內建備用清單：{e}")
+        # ── 備用硬編碼清單 ─────────────────────────────────────────────────
+        _tickers = [
     "2330",  # 台積電 (半導體)
     "2317",  # 鴻海 (電子代工)
     "2454",  # 聯發科 (IC設計)
@@ -56,6 +76,18 @@ TW_WATCHLIST = [
     "6214",  # 精誠 (資訊服務)
     "2308",  # 台達電 (電源)
 ]
+        _names = {
+            "2330": "台積電", "2317": "鴻海",   "2454": "聯發科",
+            "2882": "國泰金", "2881": "富邦金", "2603": "長榮",
+            "2002": "中鋼",   "3711": "日月光", "2412": "中華電",
+            "6214": "精誠",   "2308": "台達電",
+        }
+        return _tickers, _names
+
+
+_TW_TICKERS, _TW_NAMES = _load_tw_watchlist()
+TW_WATCHLIST  = _TW_TICKERS
+TW_STOCK_NAMES_OVERRIDE = _TW_NAMES   # 覆蓋 tw_market_context 的靜態名稱表
 
 SCAN_INTERVAL = 1800  # 30 分鐘
 
@@ -149,6 +181,27 @@ def scan_tw_stocks():
     tw_ctx = tw_ctx_analyzer.analyze()
     logger.info(f"📊 加權指數: {tw_ctx.taiex_close:,.0f} | Phase: {tw_ctx.taiex_phase} | 法人: {tw_ctx.institutional_sentiment}")
 
+    # 1b. 批次收集芒格基本面分數（非阻塞；台股 TWSE SSL 可能失敗，以 "—" 填補）
+    munger_scores: dict = {}
+    munger_profiles: dict = {}
+    try:
+        logger.info("🧐 收集台股芒格基本面分數...")
+        screener = FundamentalScreener(cache_ttl_hours=24.0)
+        for sym in TW_WATCHLIST:
+            try:
+                profile = screener.screen(sym, market="tw_stock")
+                munger_profiles[sym] = profile
+                if profile.verdict == "TOO_HARD":
+                    munger_scores[sym] = "—"
+                else:
+                    verdict_icon = "✅" if profile.verdict == "PASS" else "❌"
+                    munger_scores[sym] = f"{verdict_icon}{profile.munger_score:.0f}"
+            except Exception:
+                munger_scores[sym] = "—"
+        logger.info(f"🧐 台股芒格分數收集完成: {len(munger_scores)} 支")
+    except Exception as e:
+        logger.warning(f"台股芒格分數收集失敗（不影響主掃描）: {e}")
+
     # 2. 建立決策引擎 (使用 tw_stock 市場設定)
     try:
         engine = build_decision_engine(settings, market_name="tw_stock")
@@ -176,7 +229,7 @@ def scan_tw_stocks():
     results = []
     for symbol in TW_WATCHLIST:
         try:
-            name = TW_STOCK_NAMES.get(symbol, symbol)
+            name = TW_STOCK_NAMES_OVERRIDE.get(symbol, symbol)
             logger.info(f"  處理 {symbol} {name}...")
 
             df = collector.fetch_ohlcv(symbol=symbol, timeframe="1d", limit=250)
@@ -236,7 +289,8 @@ def scan_tw_stocks():
     print(full_report)
 
     # 保存
-    with open("scripts/last_tw_scan_report.txt", "w", encoding="utf-8") as f:
+    report_path = os.path.join(_SCRIPTS_DIR, "last_tw_scan_report.txt")
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(full_report)
 
     # 5. Signal Tracking (用 tw_ctx 建立 mock MarketContext 物件)
@@ -271,7 +325,7 @@ def scan_tw_stocks():
     logger.info(win_rate_text)
 
     # 6. SOL
-    sol_optimizer = ContextualOptimizer()
+    sol_optimizer = ContextualOptimizer(market_type="stock")
     sol_bias = sol_optimizer.analyze_and_update()
     sol_text = sol_optimizer.get_report_text()
     logger.info(sol_text)
@@ -293,6 +347,20 @@ def scan_tw_stocks():
     if notifier.enabled:
         notifier.send_message(tw_msg)
         logger.info("📱 台股報告已推送至 Telegram")
+
+    # 更新統一市場看板
+    try:
+        perf_stats = tracker.get_performance_stats()
+        md_lines = build_tw_lines(
+            report_df, tw_ctx, win_rate_text,
+            munger_scores=munger_scores or None,
+            munger_profiles=munger_profiles or None,
+            perf_stats=perf_stats,
+        )
+        update_market_section("tw", md_lines)
+        logger.info(f"📄 市場總覽已更新: data/market_dashboard.md")
+    except Exception as e:
+        logger.warning(f"Dashboard update failed: {e}")
 
     return report_df
 

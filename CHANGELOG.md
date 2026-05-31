@@ -1,5 +1,103 @@
 # Changelog
 
+## [0.6.8] - 2026-05-01
+
+### Added (進階基本面與宏觀指標升級)
+- **核心指標庫 (`FundamentalProfile`)**：
+  - 新增 `peg_ratio` (本益成長比) 與 `forward_pe` (預估本益比)
+  - 由 `yfinance` 取得資料，整合至估值評分系統
+- **宏觀風險指標 (`us_stock_scanner.py`)**：
+  - 新增抓取 `^SKEW` (黑天鵝指數)，反映期權市場對極端下行風險的定價
+- **加密幣鏈上指標 (`top_20_scanner.py`)**：
+  - 串接 DefiLlama API 抓取各協議 TVL (總鎖倉量)
+- **報告面板擴充 (`report_writer.py`)**：
+  - 美股/台股面板新增 `PEG` 與 `FCF` 欄位
+  - 加密幣面板新增 `TVL` 欄位
+  - 美股市場環境摘要新增 `SKEW` 指標
+- **圓桌會議顧問升級 (`ROUND_TABLE_PROMPT.md`)**：
+  - 塔勒布 (Taleb)：新增 SKEW > 140 的黑天鵝預警
+  - Paul Graham：要求檢視加密幣 TVL 增長以過濾資金盤
+  - 沃倫·巴菲特 (Buffett)：強制檢視 FCF (自由現金流) 與 Forward P/E
+  - Peter Lynch：新增 PEG > 2 拒絕買入之嚴格紀律
+
+---
+
+## [0.6.7] - 2026-04-12
+
+### Added (統一市場看板)
+
+#### `scripts/report_writer.py` — 新增看板寫入工具
+- `update_market_section(market, lines)` 更新 `data/market_dashboard.md` 中特定市場的 Markdown 區塊
+- 支援 `'crypto'` / `'us'` / `'tw'` 三個市場
+- 每次更新只替換對應區塊（HTML comment 標記），不影響其他市場
+- 自動更新頂部「最後更新」時間戳記
+- `build_crypto_lines()` / `build_us_lines()` / `build_tw_lines()` 格式化各市場的 Markdown 表格
+
+#### `data/market_dashboard.md` — 三市場統一看板（自動生成）
+- 結構：市場環境摘要 + 信號 Markdown 表格 + 績效行
+- 加密幣：短線/長線雙信號 + SOL 有毒/黃金環境列表
+- 美股：SPY / VIX / 10Y / 情緒 + 30 支觀測標的
+- 台股：加權指數 / RSI / 量比 + 11 支觀測標的
+
+#### 三個掃描器均已整合
+- `scripts/top_20_scanner.py` — 加密幣掃描後更新 CRYPTO 區塊
+- `scripts/us_stock_scanner.py` — 美股掃描後更新 US 區塊
+- `scripts/tw_stock_scanner.py` — 台股掃描後更新 TW 區塊
+
+---
+
+## [0.6.6] - 2026-04-12
+
+### Added (美股掃描器)
+
+#### `scripts/us_stock_scanner.py` — 新增美股掃描腳本
+- **30 支觀測標的**：跨 8 個板塊（科技/半導體/消費/金融/醫療/能源/工業/ETF），蒙格護城河優先選股
+- **美股市場背景分析** (`UsMarketContextAnalyzer`)：
+  - SPY 趨勢（SMA50 / SMA200 / RSI / Phase）
+  - VIX 恐慌指數（LOW / NORMAL / ELEVATED / EXTREME 四級）
+  - 10Y 殖利率環境（RISING / FALLING / STABLE）
+  - 綜合市場情緒（BULLISH / FEAR / CAUTIOUS_OPTIMISM / NEUTRAL）
+- **NYSE 交易時段判斷**（09:30–16:00 ET，含盤前/收盤後各一次分析）
+- **完整繼承現有框架**：SOL 環境封鎖、Munger Filter（RECOVERY+RSI<25禁SELL）、信號去重、Telegram 推送
+- **`--loop`** 持續掃描模式（每 30 分鐘）
+- **`--symbols`** 自訂掃描標的
+- **`--force`** 忽略交易時段限制（盤後手動分析用）
+
+#### `config.yaml` — 美股策略設定補完
+- 從「無覆蓋」補為明確的日線保守設定（SMA 10/50、RSI 14、MACD 12/26/9）
+- broker 從 alpaca 改為 yfinance（免費，無需帳號）
+- min_agreement = 0.55（與台股同級）
+
+---
+
+## [0.6.5] - 2026-04-12
+
+### Changed (蒙格三刀 — 止血優先)
+
+根據 574 筆歷史信號的統計分析（2026-01-30 ~ 2026-03-04），針對三個負期望值根源做手術：
+
+#### 修正一：擴大有毒環境封鎖範圍 (`contextual_optimizer.py`)
+- **`is_toxic` 新增弱毒層**：樣本 >= 20 且勝率 < 44% 且 avg_pnl < -0.05%（十進位 -0.0005）
+- 新增封鎖：`BEAR|MIXED|FLAT`（156 筆，勝率 41%，avg -0.088%）
+- 新增封鎖：`BEAR|ALT_SEASON|FLAT`（34 筆，勝率 38%，avg -0.201%）
+- 原有封鎖 `BEAR|BTC_SEASON|FLAT` 仍保留（18.8% 勝率）
+- 預計排除 190 個負期望信號
+
+#### 修正二：RECOVERY 階段 RSI < 25 禁止 SELL (`top_20_scanner.py`)
+- 新增 Munger Filter：RECOVERY 市場 + RSI < 25 → SELL 強制轉 HOLD
+- 根本原因：2026-02-06 五筆最大虧損（-2.9% ~ -5.42%）全來自 RECOVERY + 極度超賣 SELL
+- RSI 超賣（<25）本身是反彈訊號，在復甦階段賣出是方向矛盾
+
+#### 修正三：無市場背景的信號不記錄 (`signal_tracker.py`)
+- `record_signal()` 新增 context guard：`market_ctx is None` 或 `phase` 為空 → 跳過記錄
+- 根本原因：33 筆空 context 信號勝率 30.3%、avg -0.342%（全樣本最差類別）
+
+#### 即時生效：`sol_bias.json` 更新
+- `blocked_contexts` 新增 `BEAR|ALT_SEASON|FLAT` 和 `BEAR|MIXED|FLAT`
+- 下次掃描即生效，無需等待 SOL 重新分析
+
+---
+
 ## [0.6.4] - 2026-03-19
 
 ### Added (多面向資訊看板)

@@ -1,34 +1,50 @@
-name: 24/7 Crypto Market Monitor
+name: Crypto Market Scanner
 
 on:
   schedule:
-    # 每一小時執行 4 次 (每 15 分鐘一次)
-    - cron: "*/15 * * * *"
-  workflow_dispatch: # 支援手動觸發測試
+    # 每小時整點執行，跳過台灣時間 21:00–05:00（UTC 13:00–20:59）
+    # 台灣時間 05:00–20:00 = UTC 21:00–12:00
+    - cron: "0 21-23 * * *"   # UTC 21,22,23 → 台灣 05,06,07
+    - cron: "0 0-12  * * *"   # UTC 00–12   → 台灣 08–20
+  workflow_dispatch:            # 支援手動觸發
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10         # 超過 10 分鐘自動取消，避免卡住消耗配額
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"          # 快取 pip，加快後續執行速度
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          pip install requests loguru ccxt pandas
+          pip install . 2>/dev/null || true
+          pip install requests loguru ccxt pandas numpy pydantic pydantic-settings pyyaml python-dotenv rich httpx
 
       - name: Run Market Scanner
         env:
-          # 以下變數需在 GitHub Repo -> Settings -> Secrets 中設定
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          USDT_TWD_RATE: 31.4
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          CCXT_EXCHANGE:       ${{ secrets.CCXT_EXCHANGE }}
+          CCXT_API_KEY:        ${{ secrets.CCXT_API_KEY }}
+          CCXT_SECRET_KEY:     ${{ secrets.CCXT_SECRET_KEY }}
+          USDT_TWD_RATE:       "31.4"
+          PYTHONIOENCODING:    "utf-8"
         run: |
           python scripts/top_20_scanner.py
+
+      - name: Upload Report as Artifact
+        if: always()            # 即使腳本失敗也上傳，方便 debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-report-${{ github.run_number }}
+          path: scripts/last_scan_report.txt
+          retention-days: 14

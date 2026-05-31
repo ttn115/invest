@@ -167,18 +167,44 @@ markets:
       panic_buy_override:
         enabled: false         # [v0.3.1] 停用：下跌中越跌越買反而加重虧損
 
-  # ----- 美股 (使用全域預設，不需額外覆蓋) -----
+  # ----- 美股 (日線，偏保守，與台股同級) -----
   us_stock:
     enabled: true
-    broker: alpaca
+    broker: yfinance             # 免費方案 (Alpaca 需帳戶)
     paper_trading: true
     symbols:
       - AAPL
-      - TSLA
+      - MSFT
       - NVDA
+      - COST
+      - KO
+      - V
       - SPY
     timeframe: 1d
-    # 美股不設定覆蓋，自動使用全域預設策略和風控
+
+    # 美股專屬策略覆蓋 (日線，與台股相同保守設定)
+    strategies:
+      sma_crossover:
+        params:
+          fast_period: 10
+          slow_period: 50
+      rsi:
+        params:
+          period: 14
+          oversold: 30
+          overbought: 70
+      macd:
+        params:
+          fast: 12
+          slow: 26
+          signal: 9
+      bollinger:
+        params:
+          period: 20
+          std_dev: 2.0
+
+    decision_engine:
+      min_agreement: 0.55       # 美股日線與台股同級，偏保守
 
   # ----- 台股 -----
   tw_stock:

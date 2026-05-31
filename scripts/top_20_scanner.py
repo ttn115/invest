@@ -17,6 +17,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 from src.config.settings import Settings
 from src.data.indicators import IndicatorEngine
@@ -26,6 +29,7 @@ from src.monitor.notifier import TelegramNotifier
 from src.monitor.signal_tracker import SignalTracker
 from src.analysis.market_context import MarketContextAnalyzer
 from src.analysis.contextual_optimizer import ContextualOptimizer
+from report_writer import update_market_section, build_crypto_lines
 
 # Setup logging
 logger.remove()
@@ -53,6 +57,34 @@ def get_top_symbols(exchange, limit=20):
     except Exception as e:
         logger.error(f"Error fetching top symbols: {e}")
         return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "BNB/USDT"]
+
+def fetch_tvl_data(symbols):
+    """Fetch TVL data from DefiLlama."""
+    tvl_dict = {}
+    try:
+        resp = requests.get("https://api.llama.fi/protocols", timeout=10)
+        data = resp.json()
+        symbol_map = {}
+        for p in data:
+            sym = p.get("symbol", "").upper()
+            if sym not in symbol_map or p.get("tvl", 0) > symbol_map[sym].get("tvl", 0):
+                symbol_map[sym] = p
+                
+        for symbol in symbols:
+            base = symbol.split("/")[0]
+            if base in symbol_map:
+                tvl = symbol_map[base].get("tvl", 0)
+                if tvl > 1e9:
+                    tvl_dict[symbol] = f"${tvl/1e9:.1f}B"
+                elif tvl > 1e6:
+                    tvl_dict[symbol] = f"${tvl/1e6:.1f}M"
+                else:
+                    tvl_dict[symbol] = "—"
+            else:
+                tvl_dict[symbol] = "—"
+    except Exception as e:
+        logger.warning(f"Failed to fetch TVL data: {e}")
+    return tvl_dict
 
 def _combo_label(short_sig, long_sig):
     """生成短長線綜合標籤"""
@@ -436,8 +468,8 @@ def scan_markets():
     market_ctx = ctx_analyzer.analyze()
     logger.info(f"📊 Market Phase: {market_ctx.phase} | Season: {market_ctx.season} | MTF: {market_ctx.mtf_alignment}")
 
-    # SOL: 載入學習偏差並判斷當前環境
-    sol_optimizer = ContextualOptimizer()
+    # SOL: 載入學習偏差並判斷當前環境（加密幣專屬學習，與股票分離）
+    sol_optimizer = ContextualOptimizer(market_type="crypto")
     sol_bias = sol_optimizer.get_bias()
     is_blocked, block_reason = sol_bias.should_block(
         market_ctx.phase, market_ctx.season, market_ctx.fg_3d_trend
@@ -540,6 +572,17 @@ def scan_markets():
                 sol_note = f" [SOL:low-conf<{sol_agreement:.2f}]"
                 sol_interventions += 1
                 logger.info(f"🧠 SOL overrode {symbol} BUY→HOLD (confidence {decision.confidence:.2f} < SOL threshold {sol_agreement:.2f})")
+
+            # Munger Filter: RECOVERY 階段 RSI < 25 → 禁止 SELL
+            # 根據歷史數據：2026-02-06 五筆最大虧損均為 RECOVERY + RSI<20 + SELL，最多 -5.42%
+            # RSI 極度超賣本身就是反彈訊號，在復甦階段賣出是邏輯矛盾
+            if final_signal == "SELL" and market_ctx and getattr(market_ctx, "phase", "") == "RECOVERY":
+                current_rsi = float(df[rsi_col].iloc[-1]) if rsi_col in df.columns else 50.0
+                if current_rsi < 25.0:
+                    final_signal = "HOLD"
+                    sol_note += f" [Munger:RECOVERY+RSI{current_rsi:.0f}<25→HOLD]"
+                    sol_interventions += 1
+                    logger.warning(f"🧠 Munger: {symbol} SELL→HOLD (RECOVERY phase + RSI={current_rsi:.1f} < 25)")
 
             last_price = df["close"].iloc[-1]
             last_price_twd = last_price * usdt_twd
@@ -659,7 +702,8 @@ def scan_markets():
     print(full_report)
     
     # Save to file
-    with open("scripts/last_scan_report.txt", "w", encoding="utf-8") as f:
+    report_path = os.path.join(_SCRIPTS_DIR, "last_scan_report.txt")
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(full_report)
     
     # 4. Signal Tracking + SOL (must run BEFORE notification so texts are available)
@@ -699,7 +743,8 @@ def scan_markets():
     print("=" * 80 + "\n")
 
     # 存檔多面向看板
-    with open("scripts/last_dimension_report.txt", "w", encoding="utf-8") as f:
+    dim_report_path = os.path.join(_SCRIPTS_DIR, "last_dimension_report.txt")
+    with open(dim_report_path, "w", encoding="utf-8") as f:
         f.write(dimension_msg)
 
     if notifier.enabled:
@@ -717,8 +762,17 @@ def scan_markets():
             logger.warning(f"🔻 Found {len(sell_opps)} SELL alerts: {sell_opps['Symbol'].tolist()}")
         
         if has_signals:
-            notifier.send_report("scripts/last_scan_report.txt")
-    
+            notifier.send_report(report_path)
+
+    # 更新統一市場看板
+    try:
+        tvl_data = fetch_tvl_data(top_symbols)
+        md_lines = build_crypto_lines(report_df, market_ctx, fg_val, win_rate_text, sol_bias, tvl_data=tvl_data)
+        update_market_section("crypto", md_lines)
+        logger.info(f"📄 市場總覽已更新: data/market_dashboard.md")
+    except Exception as e:
+        logger.warning(f"Dashboard update failed: {e}")
+
     return report_df
 
 def main():
