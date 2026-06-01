@@ -31,7 +31,7 @@ data/signal_history.csv
 data/sol_bias.json
 data/sol_bias_crypto.json
 data/sol_bias_stock.json
-data/watchlists.json
+# data/watchlists.json — 人工維護的 focus list，納入版控
 
 # Misc
 .DS_Store

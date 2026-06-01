@@ -23,9 +23,11 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
 import urllib3
@@ -43,6 +45,23 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # 常數
 # ─────────────────────────────────────────────
 TWSE_BASE = "https://www.twse.com.tw/rwd/zh"
+
+# Focus list：從 watchlists.json 讀取台股觀察清單
+# 清單內股票在 _pre_filter 中繞過量比門檻（但仍需通過成交額與評分）
+_WATCHLISTS_PATH = Path(__file__).parent.parent.parent / "data" / "watchlists.json"
+
+
+def _load_tw_focus_set() -> set[str]:
+    """載入 watchlists.json 中的台股 focus list，回傳股票代號 set"""
+    try:
+        data = json.loads(_WATCHLISTS_PATH.read_text(encoding="utf-8"))
+        return {s["ticker"] for s in data.get("tw_stock", {}).get("symbols", [])}
+    except Exception:
+        return set()
+
+
+# 模組層級快取（一次載入）
+_TW_FOCUS_SET: set[str] = _load_tw_focus_set()
 _DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -532,6 +551,7 @@ class PostMarketScanner:
             min_turnover=min_turnover,
             inst_buy_only=inst_buy_only,
             exclude_etf=exclude_etf,
+            focus_set=_TW_FOCUS_SET,
         )
         logger.info(
             f"初步篩選後剩 {len(df_filtered)} 支（原 {total_stocks} 支）"
@@ -621,8 +641,20 @@ class PostMarketScanner:
         min_turnover: int,
         inst_buy_only: bool,
         exclude_etf: bool,
+        focus_set: set[str] = None,
     ) -> pd.DataFrame:
-        """初步條件過濾，保留有潛力的股票"""
+        """
+        初步條件過濾，保留有潛力的股票。
+
+        focus_set（來自 watchlists.json）的股票：
+          - 繞過量比門檻（volume_ratio 可低於 min_volume_ratio）
+          - 仍需通過成交額門檻（確保最低流動性）
+          - 仍需通過法人篩選（若 inst_buy_only=True）
+          → 確保優質股不因某天交易平淡而被篩掉
+        """
+        if focus_set is None:
+            focus_set = _TW_FOCUS_SET
+
         result = df.copy()
 
         # 排除 ETF（股票代號非純數字，如 0050, 00878 等以 0 開頭的 4-5 碼代號）
@@ -631,13 +663,25 @@ class PostMarketScanner:
                 result.index.astype(str).str.match(r"^[1-9]\d{3}$")
             ]
 
-        # 成交金額門檻（萬元）
+        # 成交金額門檻（萬元）—— focus list 股票用較低門檻（1000萬，確保有成交）
         if "turnover" in result.columns:
-            result = result[result["turnover"] / 10000 >= min_turnover]
+            is_focus = result.index.astype(str).isin(focus_set)
+            turnover_ok  = result["turnover"] / 10000 >= min_turnover
+            focus_turnover_ok = (result["turnover"] / 10000 >= 1000) & is_focus
+            result = result[turnover_ok | focus_turnover_ok]
 
         # 法人買超篩選
         if inst_buy_only and "total_net" in result.columns:
             result = result[result["total_net"] > 0]
+
+        # 量比篩選：focus list 股票繞過此門檻
+        if "volume_ratio" in result.columns and min_volume_ratio > 0:
+            is_focus = result.index.astype(str).isin(focus_set)
+            vol_ok = (result["volume_ratio"] >= min_volume_ratio) | is_focus
+            result = result[vol_ok]
+            focus_count = is_focus.sum()
+            if focus_count:
+                logger.info(f"  Focus list：{focus_count} 支繞過量比門檻（≥{min_volume_ratio}x）加入評分")
 
         return result
 
