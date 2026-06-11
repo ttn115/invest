@@ -26,6 +26,12 @@ except ImportError:
     print("請先安裝 yfinance：pip install yfinance")
     sys.exit(1)
 
+# 確保可 import 同目錄的 quote_utils
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from quote_utils import get_fresh_quote, freshness_banner
+
 
 # ── 工具函數 ──────────────────────────────────────────────────────
 
@@ -92,15 +98,22 @@ def run():
         print("❌ 無法取得 GDX 數據")
         return
 
+    # yfinance 最新一根日線偶爾為 NaN（尚未定版），先濾除避免污染指標
+    gdx_1d = gdx_1d.dropna(subset=["Close"])
     close_1d  = gdx_1d["Close"]
     vol_1d    = gdx_1d["Volume"]
-    close_1wk = gdx_1wk["Close"]
-    close_1h  = gdx_1h["Close"] if not gdx_1h.empty else pd.Series(dtype=float)
+    close_1wk = gdx_1wk["Close"].dropna()
+    close_1h  = gdx_1h["Close"].dropna() if not gdx_1h.empty else pd.Series(dtype=float)
 
-    price        = float(close_1d.iloc[-1])
-    price_1w_ago = float(close_1d.iloc[-6])  if len(close_1d) >= 6  else price
-    price_1m_ago = float(close_1d.iloc[-22]) if len(close_1d) >= 22 else price
-    price_3m_ago = float(close_1d.iloc[-66]) if len(close_1d) >= 66 else price
+    # 指標基準＝最後一根已完成日線；現價＝最新成交價（含盤前/盤後）
+    daily_px   = float(close_1d.iloc[-1])
+    daily_date = close_1d.index[-1].strftime("%Y-%m-%d")
+    q = get_fresh_quote("GDX", daily_close=daily_px, daily_date=daily_date)
+    price = q["live_price"] if not pd.isna(q["live_price"]) else daily_px
+
+    price_1w_ago = float(close_1d.iloc[-6])  if len(close_1d) >= 6  else daily_px
+    price_1m_ago = float(close_1d.iloc[-22]) if len(close_1d) >= 22 else daily_px
+    price_3m_ago = float(close_1d.iloc[-66]) if len(close_1d) >= 66 else daily_px
 
     high_52w     = float(close_1d.tail(252).max())
     low_52w      = float(close_1d.tail(252).min())
@@ -125,21 +138,28 @@ def run():
     today_vol  = float(vol_1d.iloc[-1])
     vol_ratio  = today_vol / avg_vol_20 if avg_vol_20 > 0 else 1.0
 
-    print(f"  GDX 現價：${price:.2f}")
+    for ln in freshness_banner("GDX", q):
+        print(f"  {ln}")
+    print(f"  GDX 現價：${price:.2f}（最新成交）  |  日線收盤 ${daily_px:.2f}（{daily_date}）")
+    print(f"  ※ 以下指標係以 {daily_date} 收盤計算")
     print(f"  52週 高/低：${high_52w:.2f} / ${low_52w:.2f}  距高：{pct_from_high:.1f}%  距低：+{pct_from_low:.1f}%  位置：{position_pct:.0f}%分位")
     print(f"  RSI 日/週/時：{rsi_1d:.1f} / {rsi_1wk:.1f} / {rsi_1h:.1f}")
     print(f"  MACD 直方：{macd_hist:.3f} ({macd_cross})")
     print(f"  BB %B：{pct_b:.2f}  下軌={bb_lower:.2f}  中軌={bb_mid:.2f}  上軌={bb_upper:.2f}")
     print(f"  SMA20/50/200：{sma20:.2f} / {sma50:.2f} / {sma200:.2f}")
     print(f"  成交量比：{vol_ratio:.2f}x")
+    _broke = lambda lv: "✅已跌破" if price < lv else "未跌破"
+    print(f"  以最新價 ${price:.2f} 檢視：BB下軌 ${bb_lower:.2f}（{_broke(bb_lower)}）；"
+          f"52週低 ${low_52w:.2f}（{_broke(low_52w)}）；SMA200 ${sma200:.2f}（{_broke(sma200)}）")
 
     # ── 2. GDX vs GLD 礦商槓桿分析 ───────────────────────────────
     print("\n[2/5] 分析 GDX/GLD 槓桿關係...")
     gld_1d  = yf.Ticker("GLD").history(period="2y", interval="1d")
-    gld_close = gld_1d["Close"] if not gld_1d.empty else pd.Series(dtype=float)
+    gld_close = gld_1d["Close"].dropna() if not gld_1d.empty else pd.Series(dtype=float)
 
     gld_price = float(gld_close.iloc[-1]) if not gld_close.empty else float("nan")
-    gdx_gld_ratio     = price / gld_price if gld_price > 0 else float("nan")
+    # 比值用日線收盤對日線收盤，與下方歷史分位 (daily/daily) 基準一致
+    gdx_gld_ratio     = daily_px / gld_price if gld_price > 0 else float("nan")
 
     # 歷史比值分位
     ratio_hist = close_1d / gld_close.reindex(close_1d.index, method="ffill")
@@ -294,10 +314,15 @@ def run():
     lines = [
         f"## GDX 黃金礦商 ETF 深度分析 — {now_str}",
         "",
-        "### 技術面指標",
+    ]
+    for ln in freshness_banner("GDX", q):
+        lines.append(f"> {ln}")
+    lines += [
+        "",
+        f"### 技術面指標（指標截至 {daily_date} 收盤）",
         "| 指標 | 數值 | 解讀 |",
         "|------|------|------|",
-        f"| 現價 | ${price:.2f} | 1W前 ${price_1w_ago:.2f} ({pct_from(price_1w_ago, price)}) · 1M前 ${price_1m_ago:.2f} ({pct_from(price_1m_ago, price)}) |",
+        f"| 現價(最新) | ${price:.2f} | 日線收盤 ${daily_px:.2f}（{daily_date}）· 1W前 ${price_1w_ago:.2f} ({pct_from(price_1w_ago, price)}) · 1M前 ${price_1m_ago:.2f} ({pct_from(price_1m_ago, price)}) |",
         f"| 52週高低 | ${high_52w:.2f} / ${low_52w:.2f} | 距高 {pct_from_high:.1f}% · 距低 +{pct_from_low:.1f}% · 位置 {position_pct:.0f}%分位 |",
         f"| RSI 日線 | {rsi_1d:.1f} | {'🔴 超賣' if rsi_1d < 30 else '🟡 中性' if rsi_1d < 70 else '🔴 超買'} |",
         f"| RSI 週線 | {rsi_1wk:.1f} | {'🔴 超賣' if rsi_1wk < 30 else '🟡 中性' if rsi_1wk < 70 else '🔴 超買'} |",
