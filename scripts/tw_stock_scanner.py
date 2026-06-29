@@ -43,6 +43,8 @@ from src.analysis.tw_market_context import TwMarketContextAnalyzer
 from src.analysis.contextual_optimizer import ContextualOptimizer
 from src.strategy.fundamental_screener import FundamentalScreener
 from report_writer import update_market_section, build_tw_lines
+from freight_index_fetcher import FreightIndexFetcher
+from tw_deep_analysis import build_shipping_block, SHIPPING_SYMBOLS
 
 logger.remove()
 logger.add(sys.stdout, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{message}</level>")
@@ -181,7 +183,16 @@ def scan_tw_stocks():
     tw_ctx = tw_ctx_analyzer.analyze()
     logger.info(f"📊 加權指數: {tw_ctx.taiex_close:,.0f} | Phase: {tw_ctx.taiex_phase} | 法人: {tw_ctx.institutional_sentiment}")
 
-    # 1b. 批次收集芒格基本面分數（非阻塞；台股 TWSE SSL 可能失敗，以 "—" 填補）
+    # 1b. 抓取航運指數（SCFI / BDI），供航運股深度分析使用
+    freight_ctx = None
+    try:
+        logger.info("🌊 抓取 SCFI / BDI 航運指數...")
+        freight_ctx = FreightIndexFetcher().fetch_all()
+        logger.info(f"🌊 {freight_ctx.summary_line()}")
+    except Exception as e:
+        logger.warning(f"航運指數抓取失敗（不影響主掃描）: {e}")
+
+    # 1c. 批次收集芒格基本面分數（非阻塞；台股 TWSE SSL 可能失敗，以 "—" 填補）
     munger_scores: dict = {}
     munger_profiles: dict = {}
     try:
@@ -348,6 +359,55 @@ def scan_tw_stocks():
         notifier.send_message(tw_msg)
         logger.info("📱 台股報告已推送至 Telegram")
 
+    # 8. 航運股深度分析（僅在有航運股且有 freight_ctx 時執行）
+    shipping_analyses: dict = {}
+    if freight_ctx is not None:
+        import json as _json
+        # 讀取持倉成本（watchlists.json 中的 cost_basis 欄位）
+        _cost_map: dict = {}
+        try:
+            _wl_file = os.path.join(os.path.dirname(__file__), "..", "data", "watchlists.json")
+            with open(_wl_file, encoding="utf-8") as _f:
+                _wl = _json.load(_f)
+            for _s in _wl.get("tw_stock", {}).get("symbols", []):
+                if _s.get("cost_basis"):
+                    _cost_map[_s["ticker"]] = float(_s["cost_basis"])
+        except Exception:
+            pass
+
+        for _, row in report_df.iterrows():
+            sym = row["Symbol"]
+            if sym not in SHIPPING_SYMBOLS:
+                continue
+            try:
+                rsi_val = float(row["RSI"]) if row["RSI"] != "N/A" else 50.0
+                peg_val = 0.0
+                munger_val = None
+                if munger_profiles and sym in munger_profiles:
+                    prof = munger_profiles[sym]
+                    peg_val = prof.peg_ratio if prof.peg_ratio > 0 else 0.0
+                if munger_scores and sym in munger_scores:
+                    raw = munger_scores[sym].replace("✅", "").replace("❌", "").replace("—", "0").strip()
+                    try:
+                        munger_val = float(raw) if raw else None
+                    except ValueError:
+                        munger_val = None
+                block = build_shipping_block(
+                    symbol=sym,
+                    name=row.get("Name", sym),
+                    price=float(row["Price"]),
+                    rsi=rsi_val,
+                    peg=peg_val,
+                    munger_score=munger_val,
+                    freight=freight_ctx,
+                    rate_10y=4.37,
+                    cost_basis=_cost_map.get(sym),
+                )
+                shipping_analyses[sym] = block
+                logger.info(f"🚢 {sym} 航運深度分析完成")
+            except Exception as e:
+                logger.warning(f"航運深度分析 {sym} 失敗: {e}")
+
     # 更新統一市場看板
     try:
         perf_stats = tracker.get_performance_stats()
@@ -356,6 +416,8 @@ def scan_tw_stocks():
             munger_scores=munger_scores or None,
             munger_profiles=munger_profiles or None,
             perf_stats=perf_stats,
+            freight_ctx=freight_ctx or None,
+            shipping_analyses=shipping_analyses or None,
         )
         update_market_section("tw", md_lines)
         logger.info(f"📄 市場總覽已更新: data/market_dashboard.md")
