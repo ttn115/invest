@@ -68,6 +68,17 @@ class FreightData:
     def trend_emoji(self) -> str:
         return {"UP": "🟢", "DOWN": "🔴", "FLAT": "⚪"}.get(self.trend, "❓")
 
+    @property
+    def has_trend(self) -> bool:
+        """
+        是否具備可信的『趨勢』資料（而非僅有水位）。
+
+        BUG 修正（2026-09）：pct_1m == 0 有兩種完全不同的含義——
+        「真的沒變動」與「抓不到比較值」。舊版一律當成前者，導致
+        下游把『資料缺失』誤判為『貿易疲弱』。此處以 prev 是否存在區分。
+        """
+        return self.ok and self.prev > 0 and (self.pct_1w != 0 or self.pct_1m != 0)
+
     def summary(self) -> str:
         if not self.ok:
             return f"{self.name}: ⚠️ 資料抓取失敗"
@@ -76,6 +87,8 @@ class FreightData:
             parts.append(f"{self.pct_1w:+.1f}%週")
         if self.pct_1m != 0:
             parts.append(f"{self.pct_1m:+.1f}%月")
+        if not self.has_trend:
+            parts.append("⚠️趨勢資料缺失")
         parts.append(f"({self.date})")
         return " ".join(parts)
 
@@ -86,9 +99,19 @@ class FreightContext:
     scfi: FreightData
 
     def dalio_position(self, rate_10y: float) -> str:
-        """Dalio 矩陣象限（容器航運視角）"""
+        """
+        Dalio 矩陣象限（容器航運視角）。
+
+        BUG 修正（2026-09）：SCFI 若只有水位、沒有趨勢資料，
+        舊版會把「未知」當成「貿易弱」，輸出假的「雙殺風險」。
+        現在明確回報資料缺失，不做無根據的判定。
+        """
+        rate_label = "利率高" if rate_10y >= 3.5 else "利率低"
+        if not self.scfi.has_trend:
+            return f"{rate_label}＋貿易趨勢未知 → ⚠️ 無法判定（SCFI 趨勢資料缺失）"
+
         rate_high = rate_10y >= 3.5
-        trade_strong = self.scfi.ok and self.scfi.pct_1m > 5
+        trade_strong = self.scfi.pct_1m > 5
         if rate_high and trade_strong:
             return "利率高＋貿易強 → 勉強到還不錯"
         if rate_high and not trade_strong:
@@ -98,8 +121,13 @@ class FreightContext:
         return "利率低＋貿易弱 → 勉強"
 
     def evergreen_outlook(self, rate_10y: float) -> str:
-        """長榮/陽明/萬海整體展望標籤"""
-        if not self.scfi.ok:
+        """
+        長榮/陽明/萬海整體展望標籤。
+
+        BUG 修正（2026-09）：趨勢資料缺失時回傳 UNKNOWN，
+        不再因 pct_1m==0 落入 NEUTRAL 而給出看似有依據的結論。
+        """
+        if not self.scfi.has_trend:
             return "UNKNOWN"
         m = self.scfi.pct_1m
         rate_high = rate_10y >= 3.5
