@@ -400,7 +400,7 @@ def scan_tw_stocks():
                     peg=peg_val,
                     munger_score=munger_val,
                     freight=freight_ctx,
-                    rate_10y=4.37,
+                    rate_10y=None,          # None = 自動抓即時 ^TNX（原寫死 4.37）
                     cost_basis=_cost_map.get(sym),
                 )
                 shipping_analyses[sym] = block

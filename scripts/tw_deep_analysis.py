@@ -11,7 +11,7 @@
         block = build_shipping_block(
             symbol=symbol, name=name, price=price,
             rsi=rsi, peg=peg, munger_score=munger_score,
-            freight=freight_ctx, rate_10y=4.37,
+            freight=freight_ctx, rate_10y=None,   # None = 自動抓即時 ^TNX
             cost_basis=184.5,   # 可選，None = 不顯示損益
         )
 """
@@ -96,14 +96,22 @@ def build_shipping_block(
     peg: float,
     munger_score: Optional[float],
     freight: "FreightContext",
-    rate_10y: float = 4.37,
+    rate_10y: Optional[float] = None,
     cost_basis: Optional[float] = None,
 ) -> str:
     """
     生成航運股深度分析 Markdown 區塊。
 
+    Args:
+        rate_10y: 10年期公債殖利率(%)。None = 自動抓取即時 ^TNX
+                  （原本寫死 4.37，會讓 Dalio 象限用過時利率判斷）
+
     回傳值：可直接附加到 market_dashboard.md 的 Markdown 字串。
     """
+    if rate_10y is None:
+        from freight_index_fetcher import fetch_10y_rate
+        rate_10y = fetch_10y_rate()
+
     lines = []
     scfi = freight.scfi
     bdi = freight.bdi
