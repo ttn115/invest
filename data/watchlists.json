@@ -64,7 +64,7 @@
       {"ticker":"2883","name":"開發金",   "sector":"金融",       "note":"創投+金融"},
       {"ticker":"2892","name":"第一金",   "sector":"金融",       "note":"官股第一銀行"},
       {"ticker":"2890","name":"永豐金",   "sector":"金融",       "note":"綜合金融"},
-      {"ticker":"2603","name":"長榮",     "sector":"航運",       "note":"貨櫃航運龍頭"},
+      {"ticker":"2603","name":"長榮",     "sector":"航運",       "note":"貨櫃航運龍頭", "cost_basis": 184.5},
       {"ticker":"2609","name":"陽明",     "sector":"航運",       "note":"貨櫃航運"},
       {"ticker":"2615","name":"萬海",     "sector":"航運",       "note":"貨櫃航運"},
       {"ticker":"2357","name":"華碩",     "sector":"品牌",       "note":"品牌NB/主機板"},

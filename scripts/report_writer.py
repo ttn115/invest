@@ -292,7 +292,9 @@ def build_us_lines(report_df, us_ctx, win_rate_text: str,
 def build_tw_lines(report_df, tw_ctx, win_rate_text: str,
                    munger_scores: dict = None,
                    munger_profiles: dict = None,
-                   perf_stats: dict = None) -> list:
+                   perf_stats: dict = None,
+                   freight_ctx=None,
+                   shipping_analyses: dict = None) -> list:
     """
     台股掃描結果 → Markdown 行清單
 
@@ -394,5 +396,43 @@ def build_tw_lines(report_df, tw_ctx, win_rate_text: str,
     perf_line = _build_perf_line(win_rate_text, perf_stats)
     if perf_line:
         lines.append(f"**績效**：{perf_line}")
+
+    # ── 航運指數區塊（SCFI / BDI） ────────────────────────────────────────
+    if freight_ctx is not None:
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append("### 🌊 航運指數")
+        lines.append("")
+        scfi = freight_ctx.scfi
+        bdi = freight_ctx.bdi
+        lines.append("| 指數 | 現值 | 週變化 | 月變化 | 趨勢 | 來源相關性 |")
+        lines.append("|------|-----:|:------:|:------:|:----:|----------|")
+        if scfi.ok:
+            lines.append(
+                f"| SCFI（貨櫃） | **{scfi.current:,.0f}** | "
+                f"{scfi.pct_1w:+.1f}% | {scfi.pct_1m:+.1f}% | "
+                f"{scfi.trend_emoji}{scfi.trend_icon} | 🔴 直接影響長榮/陽明/萬海 |"
+            )
+        else:
+            lines.append("| SCFI（貨櫃） | ⚠️ 失敗 | — | — | — | 直接影響長榮/陽明/萬海 |")
+        if bdi.ok:
+            lines.append(
+                f"| BDI（乾散貨）| {bdi.current:,.0f} | "
+                f"{bdi.pct_1w:+.1f}% | {bdi.pct_1m:+.1f}% | "
+                f"{bdi.trend_emoji}{bdi.trend_icon} | ⚪ 宏觀參考，非貨櫃指標 |"
+            )
+        else:
+            lines.append("| BDI（乾散貨）| ⚠️ 失敗 | — | — | — | 宏觀參考 |")
+        lines.append("")
+
+    # ── 航運股深度分析區塊 ────────────────────────────────────────────────
+    if shipping_analyses:
+        lines.append("---")
+        lines.append("")
+        lines.append("### 🚢 航運股深度分析")
+        lines.append("")
+        for sym in sorted(shipping_analyses.keys()):
+            lines.append(shipping_analyses[sym])
 
     return lines
