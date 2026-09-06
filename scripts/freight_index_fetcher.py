@@ -68,6 +68,17 @@ class FreightData:
     def trend_emoji(self) -> str:
         return {"UP": "🟢", "DOWN": "🔴", "FLAT": "⚪"}.get(self.trend, "❓")
 
+    @property
+    def has_trend(self) -> bool:
+        """
+        是否具備可信的『趨勢』資料（而非僅有水位）。
+
+        BUG 修正（2026-09）：pct_1m == 0 有兩種完全不同的含義——
+        「真的沒變動」與「抓不到比較值」。舊版一律當成前者，導致
+        下游把『資料缺失』誤判為『貿易疲弱』。此處以 prev 是否存在區分。
+        """
+        return self.ok and self.prev > 0 and (self.pct_1w != 0 or self.pct_1m != 0)
+
     def summary(self) -> str:
         if not self.ok:
             return f"{self.name}: ⚠️ 資料抓取失敗"
@@ -76,6 +87,8 @@ class FreightData:
             parts.append(f"{self.pct_1w:+.1f}%週")
         if self.pct_1m != 0:
             parts.append(f"{self.pct_1m:+.1f}%月")
+        if not self.has_trend:
+            parts.append("⚠️趨勢資料缺失")
         parts.append(f"({self.date})")
         return " ".join(parts)
 
@@ -86,9 +99,19 @@ class FreightContext:
     scfi: FreightData
 
     def dalio_position(self, rate_10y: float) -> str:
-        """Dalio 矩陣象限（容器航運視角）"""
+        """
+        Dalio 矩陣象限（容器航運視角）。
+
+        BUG 修正（2026-09）：SCFI 若只有水位、沒有趨勢資料，
+        舊版會把「未知」當成「貿易弱」，輸出假的「雙殺風險」。
+        現在明確回報資料缺失，不做無根據的判定。
+        """
+        rate_label = "利率高" if rate_10y >= 3.5 else "利率低"
+        if not self.scfi.has_trend:
+            return f"{rate_label}＋貿易趨勢未知 → ⚠️ 無法判定（SCFI 趨勢資料缺失）"
+
         rate_high = rate_10y >= 3.5
-        trade_strong = self.scfi.ok and self.scfi.pct_1m > 5
+        trade_strong = self.scfi.pct_1m > 5
         if rate_high and trade_strong:
             return "利率高＋貿易強 → 勉強到還不錯"
         if rate_high and not trade_strong:
@@ -98,8 +121,13 @@ class FreightContext:
         return "利率低＋貿易弱 → 勉強"
 
     def evergreen_outlook(self, rate_10y: float) -> str:
-        """長榮/陽明/萬海整體展望標籤"""
-        if not self.scfi.ok:
+        """
+        長榮/陽明/萬海整體展望標籤。
+
+        BUG 修正（2026-09）：趨勢資料缺失時回傳 UNKNOWN，
+        不再因 pct_1m==0 落入 NEUTRAL 而給出看似有依據的結論。
+        """
+        if not self.scfi.has_trend:
             return "UNKNOWN"
         m = self.scfi.pct_1m
         rate_high = rate_10y >= 3.5
@@ -142,6 +170,66 @@ def _compute_trend(current: float, prev: float) -> str:
     if pct < -1.5:
         return "DOWN"
     return "FLAT"
+
+
+# ── 資料清洗與合理性檢查 ────────────────────────────────────────────────────
+# BUG 修正（2026-09）：頁面上的「年份」會落在指數合理區間內被誤判成指數值。
+# 實例：stockq BDI 頁回傳 [728.0, 2018.0, 2018.0]，程式把年份 2018 當成上週 BDI，
+#      算出 -63.9% 的假崩跌。真實指數值帶小數，年份是精確整數 → 以此區分。
+
+_YEAR_MIN, _YEAR_MAX = 1990, 2035
+
+# 單週合理變動上限（%）；超過視為解析錯誤，不採用該 prev
+_MAX_WEEKLY_MOVE = {"BDI": 35.0, "SCFI": 45.0}
+
+
+def _looks_like_year(v: float) -> bool:
+    return v == int(v) and _YEAR_MIN <= v <= _YEAR_MAX
+
+
+def _drop_year_like(nums: List[float]) -> List[float]:
+    """
+    濾掉疑似年份的精確整數（真實運價指數多帶小數）。
+    若濾完就沒有資料，則保留原始清單（寧可有值也不要空手）。
+    """
+    filtered = [v for v in nums if not _looks_like_year(v)]
+    return filtered if filtered else nums
+
+
+def _page_has_index_data(html: str) -> bool:
+    """
+    判斷頁面是否真的含有「日期 + 指數值」的資料結構。
+    用於避免 JS 動態載入的頁面被 regex 掃出無關數字（假資料比沒資料更危險）。
+    """
+    plain = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
+    plain = re.sub(r"<[^>]+>", " ", plain)
+    plain = " ".join(plain.split())
+    # 需同時出現：日期樣式，且其附近有帶小數的四位數（指數值特徵）
+    for m in re.finditer(r"\d{4}[/-]\d{1,2}[/-]\d{1,2}", plain):
+        seg = plain[m.end(): m.end() + 60]
+        if re.search(r"\b\d{3,4}\.\d+\b", seg):
+            return True
+    return False
+
+
+def _sanitize(fd: FreightData) -> FreightData:
+    """
+    合理性檢查：單週變動若超過上限，代表 prev 很可能解析錯誤。
+    此時保留 current（通常正確），但清掉不可信的比較值，避免汙染下游判讀。
+    """
+    limit = _MAX_WEEKLY_MOVE.get(fd.name, 50.0)
+    if fd.prev and abs(fd.pct_1w) > limit:
+        logger.warning(
+            f"⚠️ {fd.name} 單週變動 {fd.pct_1w:+.1f}% 超過合理上限 {limit}%，"
+            f"判定 prev={fd.prev} 解析有誤 → 捨棄比較值（current={fd.current} 保留）"
+        )
+        fd.prev = 0.0
+        fd.pct_1w = 0.0
+        fd.trend = "FLAT"
+    if fd.pct_1m and abs(fd.pct_1m) > limit * 2:
+        logger.warning(f"⚠️ {fd.name} 月變動 {fd.pct_1m:+.1f}% 不合理 → 捨棄")
+        fd.pct_1m = 0.0
+    return fd
 
 
 def _table_numbers(html: str, lo: float, hi: float) -> List[float]:
@@ -191,26 +279,56 @@ def _keyword_numbers(html: str, keyword: str, lo: float, hi: float, window: int 
 # ── BDI 來源 ────────────────────────────────────────────────────────────────
 
 def _bdi_stockq(client: httpx.Client) -> FreightData:
+    """
+    從 stockq 解析 BDI。
+
+    BUG 修正（2026-09）：原本用「關鍵字附近抓數字」，但 "BDI" 首次出現在
+    <title>，導致抓到標題區的無關數字（含年份 2018）。頁面真正可靠的是
+    「Index Return」區塊的百分比，與「MA5~MA260」均線值。
+      Index Return: 1 day / 1 week / MTD / 1 month / 3 months / 6 months / YTD / 1 year
+      Baltic Dry MA5 MA10 MA20 MA60 MA120 MA260
+    注意：MA 值是均線，不是歷史指數序列（舊版誤把 MA5/MA10 當成本週/上週）。
+    """
     url = "https://en.stockq.org/index/BDI.php"
     r = client.get(url, headers=_HEADERS, timeout=_TIMEOUT)
     r.raise_for_status()
 
-    # 先在 keyword 附近取數
-    nums = _keyword_numbers(r.text, "BDI", 400, 14000)
-    if len(nums) < 2:
-        nums = _table_numbers(r.text, 400, 14000)
-    if len(nums) < 2:
-        raise ValueError(f"stockq BDI: only {len(nums)} values found")
+    plain = re.sub(r"<[^>]+>", " ", r.text)
+    plain = " ".join(plain.split())
 
-    current, prev = nums[0], nums[1]
-    pct_1w = (current - prev) / prev * 100 if prev else 0
-    pct_1m = (current - nums[min(4, len(nums) - 1)]) / nums[min(4, len(nums) - 1)] * 100 if len(nums) >= 5 else 0
-    return FreightData(
-        name="BDI", current=current, prev=prev,
+    # 1) Index Return 區塊：取 1 day / 1 week / MTD / 1 month 的百分比
+    pct_1w = pct_1m = 0.0
+    m = re.search(
+        r"Index Return.*?1 day\s*1 week\s*MTD\s*1 month(.*?)(?:Intraday|Technical|$)",
+        plain, re.IGNORECASE)
+    if m:
+        pcts = re.findall(r"(-?\d+(?:\.\d+)?)%", m.group(1))
+        if len(pcts) >= 4:
+            pct_1w = float(pcts[1])   # 1 week
+            pct_1m = float(pcts[3])   # 1 month
+
+    # 2) 均線區塊取 MA5 當「近期水位」的近似值（頁面未直接提供即時指數）
+    current = 0.0
+    ma = re.search(r"MA5\s*MA10\s*MA20\s*MA60\s*MA120\s*MA260\s*Deviation\s*"
+                   r"([\d.]+)\s*([\d.]+)", plain)
+    if ma:
+        current = float(ma.group(1))          # MA5
+    if not current:
+        nums = _drop_year_like(_table_numbers(r.text, 400, 14000))
+        if nums:
+            current = nums[0]
+    if not current:
+        raise ValueError("stockq BDI: 無法定位指數值")
+
+    # prev 由 current 與週變動反推（頁面未直接給上週值）
+    prev = current / (1 + pct_1w / 100) if pct_1w else 0.0
+
+    return _sanitize(FreightData(
+        name="BDI", current=round(current, 2), prev=round(prev, 2),
         pct_1w=round(pct_1w, 2), pct_1m=round(pct_1m, 2),
         trend=_compute_trend(current, prev),
         date=dt.date.today().isoformat(), source=url,
-    )
+    ))
 
 
 def _bdi_handybulk(client: httpx.Client) -> FreightData:
@@ -218,20 +336,21 @@ def _bdi_handybulk(client: httpx.Client) -> FreightData:
     r = client.get(url, headers=_HEADERS, timeout=_TIMEOUT)
     r.raise_for_status()
 
-    nums = _table_numbers(r.text, 400, 14000)
+    nums = _drop_year_like(_table_numbers(r.text, 400, 14000))
     if len(nums) < 2:
-        nums = _keyword_numbers(r.text, "Baltic", 400, 14000)
-    if len(nums) < 2:
-        raise ValueError(f"handybulk BDI: only {len(nums)} values")
+        nums = _drop_year_like(_keyword_numbers(r.text, "Baltic", 400, 14000))
+    if not nums:
+        raise ValueError("handybulk BDI: no usable values")
 
-    current, prev = nums[0], nums[1]
+    current = nums[0]
+    prev = nums[1] if len(nums) >= 2 else 0
     pct_1w = (current - prev) / prev * 100 if prev else 0
-    return FreightData(
+    return _sanitize(FreightData(
         name="BDI", current=current, prev=prev,
         pct_1w=round(pct_1w, 2), pct_1m=0,
         trend=_compute_trend(current, prev),
         date=dt.date.today().isoformat(), source=url,
-    )
+    ))
 
 
 # ── SCFI 來源 ───────────────────────────────────────────────────────────────
@@ -241,22 +360,29 @@ def _scfi_containernews(client: httpx.Client) -> FreightData:
     r = client.get(url, headers=_HEADERS, timeout=_TIMEOUT)
     r.raise_for_status()
 
-    # SCFI range：200–7000（點）
-    nums = _keyword_numbers(r.text, "SCFI", 200, 7000)
-    if len(nums) < 2:
-        nums = _table_numbers(r.text, 200, 7000)
-    if len(nums) < 2:
-        raise ValueError(f"containernews SCFI: only {len(nums)} values")
+    # BUG 修正（2026-09）：此頁為 JS 動態載入，純文字中「沒有任何 SCFI 數值」，
+    # 舊版 regex 掃全頁會抓到無關數字（曾誤回 447、2015）。
+    # → 先確認頁面確實含有可辨識的數據結構，否則誠實失敗，不要回傳垃圾。
+    if not _page_has_index_data(r.text):
+        raise ValueError("containernews SCFI: 頁面無可解析的指數資料（疑為 JS 動態載入）")
 
-    current, prev = nums[0], nums[1]
+    # SCFI range：200–7000（點）；濾掉年份（2016~2025 都落在此區間）
+    nums = _drop_year_like(_keyword_numbers(r.text, "SCFI", 200, 7000))
+    if len(nums) < 2:
+        nums = _drop_year_like(_table_numbers(r.text, 200, 7000))
+    if not nums:
+        raise ValueError("containernews SCFI: no usable values")
+
+    current = nums[0]
+    prev = nums[1] if len(nums) >= 2 else 0
     pct_1w = (current - prev) / prev * 100 if prev else 0
     pct_1m = (current - nums[min(4, len(nums) - 1)]) / nums[min(4, len(nums) - 1)] * 100 if len(nums) >= 5 else 0
-    return FreightData(
+    return _sanitize(FreightData(
         name="SCFI", current=current, prev=prev,
         pct_1w=round(pct_1w, 2), pct_1m=round(pct_1m, 2),
         trend=_compute_trend(current, prev),
         date=dt.date.today().isoformat(), source=url,
-    )
+    ))
 
 
 def _scfi_tradingeconomics(client: httpx.Client) -> FreightData:
@@ -264,21 +390,44 @@ def _scfi_tradingeconomics(client: httpx.Client) -> FreightData:
     r = client.get(url, headers=_HEADERS, timeout=_TIMEOUT)
     r.raise_for_status()
 
-    nums = _keyword_numbers(r.text, "Containerized", 200, 7000)
+    nums = _drop_year_like(_keyword_numbers(r.text, "Containerized", 200, 7000))
     if not nums:
-        nums = _table_numbers(r.text, 200, 7000)
+        nums = _drop_year_like(_table_numbers(r.text, 200, 7000))
     if not nums:
         raise ValueError("tradingeconomics SCFI: no values found")
 
     current = nums[0]
     prev = nums[1] if len(nums) >= 2 else 0
     pct_1w = (current - prev) / prev * 100 if prev else 0
-    return FreightData(
+    return _sanitize(FreightData(
         name="SCFI", current=current, prev=prev,
         pct_1w=round(pct_1w, 2), pct_1m=0,
         trend=_compute_trend(current, prev),
         date=dt.date.today().isoformat(), source=url,
-    )
+    ))
+
+
+# ── 10 年期公債殖利率 ───────────────────────────────────────────────────────
+# BUG 修正（2026-09）：原本各處寫死 rate_10y=4.37，從不抓即時值，
+# 導致 Dalio 象限與航運展望長期用過時利率判斷（實際已達 4.80）。
+# 註：yfinance 的 ^TNX 已是百分比（4.796 = 4.796%），不需再除以 10。
+
+_RATE_FALLBACK = 4.37
+
+
+def fetch_10y_rate(default: float = _RATE_FALLBACK) -> float:
+    """抓取美國 10 年期公債殖利率（%）。失敗時回退到 default。"""
+    try:
+        import yfinance as yf
+        s = yf.Ticker("^TNX").history(period="5d")["Close"].dropna()
+        if len(s):
+            v = float(s.iloc[-1])
+            if 0.1 <= v <= 20:          # 合理性檢查（避免單位錯誤）
+                return round(v, 2)
+            logger.warning(f"⚠️ ^TNX 回傳 {v} 超出合理範圍，改用預設 {default}%")
+    except Exception as e:
+        logger.debug(f"10Y 殖利率抓取失敗，改用預設 {default}%: {e}")
+    return default
 
 
 # ── 快取 ────────────────────────────────────────────────────────────────────
@@ -326,7 +475,9 @@ class FreightIndexFetcher:
     用法：
         ctx = FreightIndexFetcher().fetch_all()
         print(ctx.scfi.summary())
-        print(ctx.dalio_position(rate_10y=4.37))
+        rate = fetch_10y_rate()
+        print(f"10Y 殖利率: {rate:.2f}%")
+        print(ctx.dalio_position(rate_10y=rate))
     """
 
     def fetch_bdi(self) -> FreightData:
