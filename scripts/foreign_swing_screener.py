@@ -31,13 +31,42 @@
        並標示 2603 長榮 作為對照基準列，方便判斷其他標的是否「像長榮」。
 
 使用方式：
-    python scripts/foreign_swing_screener.py                       # 全市場、近60交易日
-    python scripts/foreign_swing_screener.py --days 90              # 拉長回顧期間
+    python scripts/foreign_swing_screener.py                       # 全市場、近120交易日
+    python scripts/foreign_swing_screener.py --days 250             # 拉長到約一年
     python scripts/foreign_swing_screener.py --universe watchlist   # 只顯示觀察名單內的標的
     python scripts/foreign_swing_screener.py --top 20 --min-turnover 30000
 
 ⚠️ 執行需要能連線 www.twse.com.tw（全市場每日 2 個請求 × N 天，TWSE 限速
-   3 req/5s，底層 collector 已內建節流；預設 60 天約需 1~2 分鐘）。
+   3 req/5s，底層 collector 已內建節流；預設 120 天約需 2~4 分鐘）。
+
+──────────────────────────────────────────────────────────────────
+📌 定位說明（重要 — 請先讀這段再用結果做決策）
+──────────────────────────────────────────────────────────────────
+本工具回答的是「**用什麼車**」，**不回答「何時上車」**。
+
+  ✅ 它能做到：找出歷史上確實會大幅擺盪、且外資頻繁進出的標的，
+     亦即「適合做波段的載具」。這是可轉移的行為特徵。
+
+  ❌ 它做不到：告訴你波段**何時啟動**。歷史會擺盪 ≠ 未來有催化劑。
+
+為何這個區分很重要（來自實際回測的教訓）：
+    2024 年紅海運價循環中，長榮從 103.5 漲到 239（+131%）。
+    當時「選對載具」只能把報酬從 +34.6%(長榮) 提升到 +102.8%(萬海)；
+    但「提早進場」可以把報酬從 +34.6% 提升到 +131%。
+    → **進場時機的影響 > 選股的影響。**
+
+正確用法（兩段式）：
+    第 1 段｜盯催化劑決定「何時」：航運看 SCFI/ZIM（scripts/freight_index_fetcher.py）、
+            記憶體看 DRAM 報價、鋼鐵看鋼價。催化劑翻揚才是進場訊號。
+    第 2 段｜用本工具決定「買誰」：在該族群/全市場中挑波段彈性大、外資活躍的標的。
+
+    單獨使用本工具選股而不看催化劑，容易在「歷史很會漲但現在沒動能」的
+    標的上空等，或在行情已走完一大段後才追進。
+
+相關工具：
+    scripts/freight_index_fetcher.py   — 航運催化劑（SCFI/BDI）監控
+    scripts/shipping_elasticity.py     — 航運族群內的循環彈性回測
+    docs/evergreen_dna_profile.md      — 「找長榮替身」思路的已知侷限（請一併參閱）
 """
 
 from __future__ import annotations
@@ -138,7 +167,7 @@ class ForeignSwingScreener:
 
     def collect_history(
         self,
-        days: int = 60,
+        days: int = 120,
         max_calendar_lookback: int = 150,
     ) -> pd.DataFrame:
         """
@@ -363,7 +392,10 @@ def main() -> None:
         description="外資波段篩選器 — 找出像長榮(2603)一樣「波段大 + 外資頻繁進出」的台股標的",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--days", type=int, default=60, help="回顧交易日數（預設60，約3個月）")
+    parser.add_argument("--days", type=int, default=120,
+                        help="回顧交易日數（預設120，約6個月）。註：8%% 門檻下 60 天"
+                             "通常只能確認 2~3 次擺動，樣本不足以穩定刻畫波段性格，"
+                             "故預設拉長；要更穩健可用 --days 250（約一年）")
     parser.add_argument(
         "--universe", choices=["all", "watchlist"], default="all",
         help="all=全市場（預設）；watchlist=只顯示 data/watchlists.json 觀察名單內的標的"
