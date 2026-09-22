@@ -158,7 +158,19 @@ def main():
 
     # 5) 長榮契合度評分
     def nz(col):
-        x = D[col]; return (x - x.min()) / (x.max() - x.min() + 1e-9)
+        """
+        百分位排名正規化（0~1）。
+
+        改進（2026-09）：原用 min-max，單一極端值會把其餘標的全部壓到接近 0，
+        使分數失去區辨力（例：某檔外資買超 10 萬張，其他幾百張 → 全部趨近 0）。
+        改用百分位排名，只看相對次序，對極端值穩健。
+        （方法借鑑 scripts/foreign_swing_screener.py 的 _normalize）
+        """
+        x = D[col]
+        if x.nunique() <= 1:
+            return pd.Series(0.5, index=x.index)
+        return x.rank(pct=True)
+
     D["beta_fit"] = 1 - (D["beta"] - BENCH_BETA).abs() / (BETA_HIGH - BETA_LOW)
     D["score"] = (0.25 * nz("yield") + 0.20 * (1 - nz("pb")) +
                   0.25 * nz("foreign") + 0.15 * nz("vol") +
