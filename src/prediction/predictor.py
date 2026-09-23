@@ -346,9 +346,18 @@ class Predictor:
         )
 
     def _apply_calibration(self, market: str, raw_conf: float) -> float:
-        """套用信心校準映射（無映射時回傳原值）"""
-        buckets = (self.calibration.get(market, {}) or {}).get("buckets", [])
-        for lo, hi, empirical_hit in buckets:
+        """
+        套用信心校準（無校準資料時回傳原值）。
+
+        顯示信心 = w × 該桶收縮後的實測命中率 + (1 − w) × 模型原始信心，
+        w 由 calibrator 依已驗證筆數給定（樣本少 → w 小 → 保留原始信心的排序）。
+        舊格式（無 weight 欄位）視為 w = 1，即直接採用桶內命中率（舊行為）。
+        """
+        cal = self.calibration.get(market) or {}
+        buckets = cal.get("buckets", [])
+        w = float(cal.get("weight", 1.0))
+        for b in buckets:
+            lo, hi, rate = b[0], b[1], b[2]
             if lo <= raw_conf < hi or (hi >= 100 and raw_conf >= lo):
-                return round(empirical_hit * 100, 1)
+                return round(w * rate * 100 + (1 - w) * raw_conf, 1)
         return raw_conf
