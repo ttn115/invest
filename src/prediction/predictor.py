@@ -43,17 +43,37 @@ _DIR_THRESHOLD = {"tw_stock": 1.0, "crypto": 2.0}
 # 特徵抽取（特徵名 = ScoreEngine 信號旗標，確保詞彙一致）
 # ──────────────────────────────────────────────────────────────
 
+def _clip(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _squash(v: float, scale: float) -> float:
+    """以 tanh 平滑壓縮到 (-1, 1)，保留正負號；用於張數等長尾數值"""
+    return tanh(v / scale) if scale else 0.0
+
+
 def _tw_features(c) -> dict:
-    """台股 ScanCandidate → 特徵向量（0/1），鏡像 ScoreEngine.score 的條件"""
+    """
+    台股 ScanCandidate → 特徵向量。
+
+    改進（2026-09）：原本全為 0/1 二元旗標，導致「信號組合相同的股票得到
+    完全相同的預測」——實測 25 筆台股預測中有 19 筆同為 +4.80%，毫無區辨度。
+    現在在保留二元旗標（延續 ScoreEngine 語意與權重初始化）之外，
+    另加一組連續特徵（c_ 前綴），讓同組信號的個股也能依強弱產生梯度。
+    """
     vr  = float(getattr(c, "volume_ratio", 0) or 0)
     ti  = int(getattr(c, "total_inst", 0) or 0)
+    fn  = int(getattr(c, "foreign_net", 0) or 0)
+    tn  = int(getattr(c, "trust_net", 0) or 0)
     rsi = float(getattr(c, "rsi", 0) or 0)
     vol = int(getattr(c, "volume", 0) or 0)
     mc  = int(getattr(c, "margin_change", 0) or 0)
     a20 = bool(getattr(c, "above_ma20", False))
     a60 = bool(getattr(c, "above_ma60", False))
     chg = float(getattr(c, "change_pct", 0) or 0)
+    score = float(getattr(c, "score", 0) or 0)
     return {
+        # ── 二元旗標（與 ScoreEngine.WEIGHTS 同詞彙）──────────────
         "inst_buy_strong":    1.0 if ti > 3000 else 0.0,
         "inst_buy_normal":    1.0 if 500 < ti <= 3000 else 0.0,
         "volume_surge_high":  1.0 if vr >= 3.0 else 0.0,
@@ -67,11 +87,22 @@ def _tw_features(c) -> dict:
         "inst_sell":          1.0 if ti < -500 else 0.0,
         "top_reversal":       1.0 if (vr >= 2.0 and chg < -1.0 and a60) else 0.0,
         "rsi_overbought":     1.0 if rsi > 75 else 0.0,
+        # ── 連續特徵（提供區辨梯度）────────────────────────────
+        "c_score":         score / 100.0,                    # 0~1
+        "c_vol_ratio":     _clip(vr, 0, 5) / 5.0,            # 0~1（>5x 視為飽和）
+        "c_inst_flow":     _squash(ti, 3000),                # -1~1
+        "c_foreign_flow":  _squash(fn, 3000),                # -1~1
+        "c_trust_flow":    _squash(tn, 1500),                # -1~1（投信量級較小）
+        "c_rsi_dev":       _clip((rsi - 50.0) / 50.0, -1, 1),  # -1~1（正=偏熱）
+        "c_change":        _clip(chg, -10, 10) / 10.0,       # -1~1
     }
 
 
 def _crypto_features(c) -> dict:
-    """虛擬幣 CryptoCandidate → 特徵向量（0/1），鏡像 CryptoScoreEngine 的條件"""
+    """
+    虛擬幣 CryptoCandidate → 特徵向量。
+    同樣在二元旗標外加上 c_ 連續特徵以提供區辨梯度（見 _tw_features 說明）。
+    """
     vr   = float(getattr(c, "volume_ratio", 0) or 0)
     c1h  = float(getattr(c, "change_1h", 0) or 0)
     c4h  = float(getattr(c, "change_4h", 0) or 0)
@@ -79,7 +110,9 @@ def _crypto_features(c) -> dict:
     rsi1 = float(getattr(c, "rsi_1h", 0) or 0)
     a20  = bool(getattr(c, "above_ma20_4h", False))
     rank = int(getattr(c, "market_cap_rank", 999) or 999)
+    score = float(getattr(c, "score", 0) or 0)
     return {
+        # ── 二元旗標 ────────────────────────────────────────────
         "vol_surge_high":  1.0 if vr >= 4.0 else 0.0,
         "vol_surge_mid":   1.0 if 2.5 <= vr < 4.0 else 0.0,
         "vol_mild":        1.0 if 1.5 <= vr < 2.5 else 0.0,
@@ -97,6 +130,14 @@ def _crypto_features(c) -> dict:
         "mom_1h_drop":     1.0 if c1h <= -5.0 else 0.0,
         "day_crash":       1.0 if c24 < -10.0 else 0.0,
         "rsi_overbought":  1.0 if rsi1 > 80 else 0.0,
+        # ── 連續特徵 ────────────────────────────────────────────
+        "c_score":       score / 100.0,
+        "c_vol_ratio":   _clip(vr, 0, 6) / 6.0,
+        "c_mom_1h":      _clip(c1h, -8, 8) / 8.0,
+        "c_trend_4h":    _clip(c4h, -15, 15) / 15.0,
+        "c_change_24h":  _clip(c24, -25, 25) / 25.0,
+        "c_rsi_dev":     _clip((rsi1 - 50.0) / 50.0, -1, 1),
+        "c_liquidity":   _clip((200 - rank) / 200.0, 0, 1),   # 排名越前越接近1
     }
 
 
@@ -109,12 +150,39 @@ def extract_features(candidate, market: str) -> dict:
     raise ValueError(f"未知市場: {market}")
 
 
-# 初始權重（%-報酬單位）：由 ScoreEngine 權重 × scale 換算
+# 連續特徵的初始權重（%-報酬單位）。
+# 刻意設得比二元旗標小：最強情境下總貢獻約 +2.5%，讓 day-1 預測幅度維持
+# 在合理區間（強勢股 5 日約 6~7%，而非動輒 +10%），同時提供足夠的區辨梯度。
+# 這些只是起始猜測，真正的權重由 calibrator 依實際報酬回歸逐步修正。
+_INIT_CONT_TW = {
+    "c_score":        0.6,    # 評分越高預期報酬越高
+    "c_vol_ratio":    0.4,    # 量能確認
+    "c_inst_flow":    0.5,    # 三大法人淨流入
+    "c_foreign_flow": 0.5,    # 外資淨流入
+    "c_trust_flow":   0.25,   # 投信淨流入
+    "c_rsi_dev":     -0.45,   # RSI 偏熱 → 扣分（過熱風險）
+    "c_change":       0.15,   # 當日動能（小幅正向）
+}
+
+_INIT_CONT_CRYPTO = {
+    "c_score":       0.7,
+    "c_vol_ratio":   0.5,
+    "c_mom_1h":      0.4,
+    "c_trend_4h":    0.6,
+    "c_change_24h":  0.3,
+    "c_rsi_dev":    -0.5,
+    "c_liquidity":   0.25,
+}
+
+
+# 初始權重（%-報酬單位）：由 ScoreEngine 權重 × scale 換算，再併入連續特徵
 def _initial_tw_weights() -> dict:
     from src.scanner.post_market_scanner import ScoreEngine
     w = ScoreEngine.WEIGHTS
     s = _SCALE["tw_stock"]
-    return {k: round(v * s, 4) for k, v in w.items()}
+    out = {k: round(v * s, 4) for k, v in w.items()}
+    out.update(_INIT_CONT_TW)
+    return out
 
 
 def _initial_crypto_weights() -> dict:
@@ -129,7 +197,15 @@ def _initial_crypto_weights() -> dict:
         "mom_1h_drop": -10, "day_crash": -5, "rsi_overbought": -15,
     }
     s = _SCALE["crypto"]
-    return {k: round(v * s, 4) for k, v in pts.items()}
+    out = {k: round(v * s, 4) for k, v in pts.items()}
+    out.update(_INIT_CONT_CRYPTO)
+    return out
+
+
+_INITIAL_WEIGHTS = {
+    "tw_stock": _initial_tw_weights,
+    "crypto":   _initial_crypto_weights,
+}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -176,7 +252,8 @@ class Predictor:
     def _load_or_init_model(self) -> dict:
         if self.model_path.exists():
             try:
-                return json.loads(self.model_path.read_text(encoding="utf-8"))
+                model = json.loads(self.model_path.read_text(encoding="utf-8"))
+                return self._migrate_model(model)
             except Exception as e:
                 logger.warning(f"prediction_model.json 解析失敗，改用初始權重: {e}")
         # 冷啟動初始化
@@ -191,6 +268,28 @@ class Predictor:
         }
         self._save_model(model)
         logger.info("🆕 初始化 prediction_model.json（權重來自 ScoreEngine）")
+        return model
+
+    def _migrate_model(self, model: dict) -> dict:
+        """
+        補齊舊模型缺少的特徵權重。
+
+        新增連續特徵（c_ 前綴）後，既有 model json 不含這些鍵，
+        predict() 會以 0 代入而完全失效。此處補上初始值並存檔，
+        使既有累積的訓練成果（其他權重）得以保留。
+        """
+        changed = []
+        for market, init_fn in _INITIAL_WEIGHTS.items():
+            m = model.setdefault("models", {}).setdefault(
+                market, {"bias": 0.0, "weights": {}, "n_trained": 0})
+            weights = m.setdefault("weights", {})
+            for k, v in init_fn().items():
+                if k not in weights:
+                    weights[k] = v
+                    changed.append(f"{market}.{k}")
+        if changed:
+            self._save_model(model)
+            logger.info(f"🔄 模型已補齊 {len(changed)} 個新特徵權重（連續特徵）")
         return model
 
     def _save_model(self, model: dict) -> None:

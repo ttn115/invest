@@ -23,7 +23,12 @@ from loguru import logger
 from .predictor import MODEL_PATH, CALIBRATION_PATH, _SCALE
 from .prediction_tracker import DEFAULT_HISTORY, PRED_HEADERS
 
-MIN_VERIFIED = 15            # 啟動校準的最低已驗證筆數
+MIN_VERIFIED = 15            # 啟動校準的最低已驗證筆數（全體）
+# 單一市場啟動校準的門檻。
+# BUG 修正（2026-09）：原本市場迴圈也用 MIN_VERIFIED(15)，導致
+# 「全體 15 筆但分散在兩個市場」時兩邊都被 skip —— 版本號空跳、
+# n_trained 卻始終為 0，學習迴圈實際上從未啟動。
+MIN_VERIFIED_PER_MARKET = 8
 _LR = 0.02                   # 權重梯度步長（小 → 只 nudge）
 _L2 = 0.01                   # L2 正則
 _MAX_STEP = 0.5              # 單次每權重最大變動（%-報酬單位）
@@ -54,7 +59,9 @@ class Calibrator:
 
         for market in ("tw_stock", "crypto"):
             mrows = [r for r in rows if r["market"] == market]
-            if len(mrows) < MIN_VERIFIED:
+            if len(mrows) < MIN_VERIFIED_PER_MARKET:
+                logger.info(f"  {market}: {len(mrows)}/{MIN_VERIFIED_PER_MARKET} 筆已驗證，"
+                            f"樣本不足，本市場暫不校準")
                 continue
 
             # 1) 信心校準
