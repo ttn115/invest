@@ -309,24 +309,116 @@ class MarginTradingCollector:
         logger.info(f"[融資融券-上市] 抓取 {date_str}")
         data = _twse_get(url, params)
         if not data:
+            # _twse_get 在 stat != OK（多為非交易日）或連線失敗時回傳 None
             return pd.DataFrame()
 
-        # MI_MARGN 有 table1（融資）和 table2（融券）兩組欄位
-        fields1 = data.get("fields1", [])
-        rows1   = data.get("data1", [])
-        fields2 = data.get("fields2", [])
-        rows2   = data.get("data2", [])
+        if data.get("tables"):
+            # 新版格式（2026 起觀察到）：tables 陣列，個股資料在含「代號」欄的那張表
+            table = next(
+                (t for t in data["tables"] if "代號" in (t.get("fields") or [])),
+                None,
+            )
+            if table is None:
+                logger.error(
+                    f"[融資融券-上市] {date_str} API 回傳 OK 但找不到個股表格，"
+                    f"TWSE 格式可能再次改版（tables 標題："
+                    f"{[t.get('title') for t in data['tables']]}）"
+                )
+                return pd.DataFrame()
+            df1, df2 = self._tables_to_legacy(table)
+        else:
+            # 舊版格式：data1（融資）/ data2（融券）
+            fields1 = data.get("fields1", [])
+            rows1   = data.get("data1", [])
+            fields2 = data.get("fields2", [])
+            rows2   = data.get("data2", [])
+            df1 = pd.DataFrame(rows1, columns=fields1) if rows1 else pd.DataFrame()
+            df2 = pd.DataFrame(rows2, columns=fields2) if rows2 else pd.DataFrame()
 
-        if not rows1:
-            logger.warning(f"[融資融券-上市] {date_str} 無資料")
+        if df1.empty:
+            # stat 為 OK 卻沒有資料列：不是非交易日，而是解析失敗，必須顯眼
+            logger.error(
+                f"[融資融券-上市] {date_str} API 回傳 OK 但解析不出任何資料列，"
+                f"TWSE 格式可能已改版（頂層鍵：{list(data.keys())}）"
+            )
             return pd.DataFrame()
-
-        df1 = pd.DataFrame(rows1, columns=fields1) if rows1 else pd.DataFrame()
-        df2 = pd.DataFrame(rows2, columns=fields2) if rows2 else pd.DataFrame()
 
         df = self._merge_margin_data(df1, df2, date_str)
         logger.info(f"[融資融券-上市] {date_str} 共 {len(df)} 支")
         return df
+
+    # 新版 MI_MARGN 個股表的已知欄位配置（groups 缺漏時的備援）
+    _MARGIN_FALLBACK_OWNER = ["股票"] * 2 + ["融資"] * 6 + ["融券"] * 6 + ["", ""]
+
+    @classmethod
+    def _tables_to_legacy(cls, table: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        新版 MI_MARGN 個股表 → 舊版 (df1 融資, df2 融券)，以沿用 _merge_margin_data。
+
+        BUG 修正（2026-09）：TWSE 把融資、融券兩張表合併成一張 16 欄的表，
+        且欄名重複（「買進 / 賣出 / 前日餘額 / 今日餘額 / 次一營業日限額」
+        各出現兩次）。舊程式讀不到 data1/data2，連續多日回傳空表並記錄成
+        「無資料」，使 margin_change 全為 0：每檔都拿到「融資健康」+10 分，
+        「融資大增」風險旗標也永遠不會觸發。
+
+        表格附帶 groups（例：股票 span 2 / 融資 span 6 / 融券 span 6 / 2 個單欄），
+        據此判定每一欄屬於融資或融券，而不是依賴重複的欄名。
+        驗算（2330, 2026-09-22）：融資 前日 28,742 + 買進 1,382 − 賣出 570
+        − 現金償還 29 = 今日 29,525 ✓；融券 前日 16 + 賣出 1 − 買進 6 = 今日 11 ✓
+        """
+        fields = table.get("fields") or []
+        rows = table.get("data") or []
+
+        owner: list[str] = []
+        for g in table.get("groups") or []:
+            owner += [g.get("title", "")] * int(g.get("span", 1))
+        if len(owner) != len(fields):
+            if len(fields) != len(cls._MARGIN_FALLBACK_OWNER):
+                logger.error(
+                    f"[融資融券-上市] 個股表欄位配置無法辨識（{len(fields)} 欄，"
+                    f"groups 總寬 {len(owner)}），為避免錯位不予解析"
+                )
+                return pd.DataFrame(), pd.DataFrame()
+            owner = cls._MARGIN_FALLBACK_OWNER
+
+        # (群組, 新版欄名) → 舊版欄名；融資與融券分別放進 df1 / df2
+        margin_map = {
+            ("股票", "代號"): "股票代號",
+            ("股票", "名稱"): "股票名稱",
+            ("融資", "買進"): "融資買進",
+            ("融資", "賣出"): "融資賣出",
+            ("融資", "現金償還"): "現金償還",
+            ("融資", "前日餘額"): "前日餘額",
+            ("融資", "今日餘額"): "今日餘額",
+            ("融資", "次一營業日限額"): "限額",
+        }
+        short_map = {
+            ("股票", "代號"): "股票代號",
+            ("融券", "買進"): "融券買進",
+            ("融券", "賣出"): "融券賣出",
+            ("融券", "現券償還"): "現券償還",
+            ("融券", "前日餘額"): "前日餘額",
+            ("融券", "今日餘額"): "今日餘額",
+            ("融券", "次一營業日限額"): "限額",
+        }
+
+        def pick(mapping: dict) -> pd.DataFrame:
+            cols = {}
+            for i, (grp, name) in enumerate(zip(owner, fields)):
+                key = mapping.get((grp, name))
+                if key:
+                    cols[key] = [r[i] if i < len(r) else None for r in rows]
+            return pd.DataFrame(cols)
+
+        df1 = pick(margin_map)
+        df2 = pick(short_map)
+
+        # 資券互抵為獨立單欄（不屬於融資或融券群組）
+        if "資券互抵" in fields:
+            j = fields.index("資券互抵")
+            df2["資券相抵"] = [r[j] if j < len(r) else None for r in rows]
+
+        return df1, df2
 
     def fetch_twse_stock(
         self,
