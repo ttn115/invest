@@ -17,6 +17,19 @@ REM
 REM  Manual test:
 REM    scripts\run_daily_scan.bat
 REM    scripts\run_daily_scan.bat --step predict
+REM
+REM  Task Scheduler setup (to recreate on a new machine), PowerShell,
+REM  replace REPO_DIR with the repo path:
+REM    schtasks /Create /TN "StockInvest Daily Scan" /SC DAILY /ST 18:30 /F /TR "REPO_DIR\scripts\run_daily_scan.bat"
+REM    $t = Get-ScheduledTask -TaskName "StockInvest Daily Scan"; $s = $t.Settings
+REM    $s.DisallowStartIfOnBatteries = $false   # also run on battery
+REM    $s.StopIfGoingOnBatteries     = $false   # do not abort when unplugged
+REM    $s.StartWhenAvailable         = $true    # catch up a missed 18:30 run
+REM    $s.ExecutionTimeLimit         = "PT2H"   # per-step timeouts total ~50 min
+REM    Set-ScheduledTask -TaskName "StockInvest Daily Scan" -Settings $s
+REM  18:30 is chosen because TWSE T86/MI_MARGN data is published ~18:00.
+REM  Logon mode stays "Interactive only": running while logged off would
+REM  require storing the Windows password in the task.
 REM ============================================================
 
 setlocal
